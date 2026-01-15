@@ -1,0 +1,37 @@
+[project]
+name = "coderdojo"
+version = "0.1.0"
+description = "CoderDojo Guide Generator - Create printable Dutch instruction guides from online tutorials"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "playwright>=1.40",
+    "beautifulsoup4>=4.12",
+    "markdownify>=0.11",
+    "click>=8.1",
+    "rich>=13.7",
+    "httpx>=0.26",
+    "pydantic>=2.5",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]

@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:wiki.elecfreaks.com)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "Bash(docker:*)",
+      "Bash(docker-compose:*)",
+      "Bash(python:*)",
+      "Bash(pip:*)",
+      "Bash(uvicorn:*)",
+      "Bash(git:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(tasklist:*)",
+      "Bash(taskkill:*)",
+      "Bash(netstat:*)",
+      "Bash(timeout:*)",
+      "Bash(del:*)",
+      "Bash(dir:*)",
+      "Bash(chcp:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(tail:*)",
+      "Bash(tree:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(findstr:*)",
+      "Bash(echo:*)",
+      "Bash(tee:*)",
+      "Bash(xargs:*)",
+      "Bash(curl:*)",
+      "Bash(ping:*)",
+      "WebFetch(domain:playwright.dev)",
+      "WebFetch(domain:click.palletsprojects.com)",
+      "Skill(prp-core:prp-plan)",
+      "Skill(prp-core:prp-implement)",
+      "Bash(uv sync:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run:*)"
+    ]
+  }
+}

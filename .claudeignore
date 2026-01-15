@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+vendor/
+.venv/
+__pycache__/
+*.pyc
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+target/
+
+# Large/binary files
+*.min.js
+*.bundle.js
+*.wasm
+*.exe
+*.dll
+
+# Sensitive files
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# IDE/Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
