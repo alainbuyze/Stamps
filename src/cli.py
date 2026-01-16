@@ -12,9 +12,12 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from src.core.config import get_settings
 from src.core.logging import setup_logging
+from src.downloader import download_images
+from src.enhancer import enhance_all_images
 from src.extractor import ContentExtractor
 from src.generator import generate_guide, save_guide
 from src.scraper import fetch_page
+from src.translator import translate_content
 
 console = Console()
 
@@ -62,13 +65,17 @@ def get_output_filename(url: str, title: str) -> str:
     return slugify(title)[:60]
 
 
-async def _generate(url: str, output: str, verbose: bool) -> None:
+async def _generate(
+    url: str, output: str, verbose: bool, no_enhance: bool, no_translate: bool
+) -> None:
     """Generate a guide from a single tutorial URL.
 
     Args:
         url: Tutorial URL to process.
         output: Output directory path.
         verbose: Enable verbose output.
+        no_enhance: Skip image enhancement.
+        no_translate: Skip Dutch translation.
     """
     settings = get_settings()
 
@@ -77,6 +84,7 @@ async def _generate(url: str, output: str, verbose: bool) -> None:
     setup_logging(log_level)
 
     extractor = ContentExtractor()
+    output_dir = Path(output)
 
     # Check if we can handle this URL
     if not extractor.can_extract(url):
@@ -107,6 +115,39 @@ async def _generate(url: str, output: str, verbose: bool) -> None:
             console.print(f"[red]Error extracting content:[/red] {e}")
             raise SystemExit(1)
 
+        # Download images
+        progress.update(task, description="Downloading images...")
+        try:
+            content = await download_images(content, output_dir)
+            downloaded = sum(1 for img in content.images if img.get("local_path"))
+            progress.update(
+                task, description=f"Downloaded {downloaded}/{len(content.images)} images"
+            )
+        except Exception as e:
+            console.print(f"[yellow]Warning:[/yellow] Image download failed: {e}")
+            # Continue without images
+
+        # Enhance images (optional)
+        if not no_enhance and any(img.get("local_path") for img in content.images):
+            progress.update(task, description="Enhancing images...")
+            try:
+                content = enhance_all_images(content, output_dir)
+                enhanced = sum(1 for img in content.images if img.get("enhanced_path"))
+                progress.update(task, description=f"Enhanced {enhanced} images")
+            except Exception as e:
+                console.print(f"[yellow]Warning:[/yellow] Image enhancement failed: {e}")
+                # Continue without enhancement
+
+        # Translate content (optional)
+        if not no_translate:
+            progress.update(task, description="Translating to Dutch...")
+            try:
+                content = translate_content(content)
+                progress.update(task, description="Translation complete")
+            except Exception as e:
+                console.print(f"[yellow]Warning:[/yellow] Translation failed: {e}")
+                # Continue with English content
+
         # Generate markdown
         progress.update(task, description="Generating guide...")
         try:
@@ -118,7 +159,7 @@ async def _generate(url: str, output: str, verbose: bool) -> None:
         # Save to file
         progress.update(task, description="Saving guide...")
         filename = get_output_filename(url, content.title)
-        output_path = Path(output, f"{filename}.md")
+        output_path = output_dir / f"{filename}.md"
 
         try:
             save_guide(guide, output_path)
@@ -126,14 +167,21 @@ async def _generate(url: str, output: str, verbose: bool) -> None:
             console.print(f"[red]Error saving guide:[/red] {e}")
             raise SystemExit(1)
 
-    # Success message - encode title for safe console output
+    # Build success message
+    downloaded = sum(1 for img in content.images if img.get("local_path"))
+    enhanced = sum(1 for img in content.images if img.get("enhanced_path"))
+    language = content.metadata.get("language", "en")
+
+    # Encode title for safe console output
     safe_title = content.title.encode("ascii", errors="replace").decode("ascii")
     console.print(
         Panel(
             f"[green]Guide generated successfully![/green]\n\n"
             f"[bold]Title:[/bold] {safe_title}\n"
             f"[bold]Sections:[/bold] {len(content.sections)}\n"
-            f"[bold]Images:[/bold] {len(content.images)}\n"
+            f"[bold]Images:[/bold] {downloaded} downloaded"
+            + (f", {enhanced} enhanced" if enhanced else "")
+            + f"\n[bold]Language:[/bold] {language}\n"
             f"[bold]Output:[/bold] {output_path}",
             title="Success",
             border_style="green",
@@ -152,9 +200,11 @@ def cli() -> None:
 @click.option("--url", required=True, help="Tutorial page URL")
 @click.option("--output", "-o", default="./output", help="Output directory")
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
-def generate(url: str, output: str, verbose: bool) -> None:
+@click.option("--no-enhance", is_flag=True, help="Skip image enhancement")
+@click.option("--no-translate", is_flag=True, help="Skip Dutch translation")
+def generate(url: str, output: str, verbose: bool, no_enhance: bool, no_translate: bool) -> None:
     """Generate a guide from a single tutorial URL."""
-    asyncio.run(_generate(url, output, verbose))
+    asyncio.run(_generate(url, output, verbose, no_enhance, no_translate))
 
 
 @cli.command()

@@ -30,6 +30,24 @@ class Settings(BaseSettings):
         description="Log message format",
     )
 
+    # Image settings
+    IMAGE_DOWNLOAD_TIMEOUT: int = Field(default=30, description="Image download timeout in seconds")
+    IMAGE_OUTPUT_DIR: str = Field(default="images", description="Subdirectory for images")
+
+    # Enhancement settings (Upscayl)
+    UPSCAYL_PATH: str = Field(
+        default="C:\\Program Files\\Upscayl\\resources\\bin\\upscayl-bin.exe",
+        description="Path to Upscayl binary",
+    )
+    UPSCAYL_SCALE: int = Field(default=4, description="Upscale factor (2 or 4)")
+    UPSCAYL_MODEL: str = Field(default="realesrgan-x4plus", description="Upscayl model name")
+    ENHANCE_IMAGES: bool = Field(default=True, description="Enable image enhancement")
+
+    # Translation settings
+    TRANSLATE_ENABLED: bool = Field(default=True, description="Enable Dutch translation")
+    TRANSLATION_SOURCE: str = Field(default="en", description="Source language")
+    TRANSLATION_TARGET: str = Field(default="nl", description="Target language (Dutch)")
+
 
 # Singleton pattern for settings
 _settings: Settings | None = None

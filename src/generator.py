@@ -17,12 +17,25 @@ logger = logging.getLogger(__name__)
 
 
 class GuideMarkdownConverter(MarkdownConverter):
-    """Custom Markdown converter that preserves image URLs."""
+    """Custom Markdown converter that preserves image URLs.
+
+    Can optionally use local image paths from an image map.
+    """
+
+    def __init__(self, image_map: dict[str, str] | None = None, **kwargs):
+        """Initialize converter with optional image mapping.
+
+        Args:
+            image_map: Dict mapping remote URLs to local paths.
+            **kwargs: Arguments passed to parent MarkdownConverter.
+        """
+        super().__init__(**kwargs)
+        self.image_map = image_map or {}
 
     def convert_img(
         self, el: Tag, text: str = "", convert_as_inline: bool = False, **kwargs
     ) -> str:
-        """Convert img tag to markdown, preserving the full URL.
+        """Convert img tag to markdown, using local path if available.
 
         Args:
             el: The img element.
@@ -34,16 +47,22 @@ class GuideMarkdownConverter(MarkdownConverter):
         alt = el.get("alt", "")
         title = el.get("title", "")
 
+        # Check for local path in image map
+        local_path = self.image_map.get(src)
+        if local_path:
+            src = local_path
+
         if title:
             return f'![{alt}]({src} "{title}")'
         return f"![{alt}]({src})"
 
 
-def html_to_markdown(html: str | Tag) -> str:
+def html_to_markdown(html: str | Tag, image_map: dict[str, str] | None = None) -> str:
     """Convert HTML to Markdown using custom converter.
 
     Args:
         html: HTML string or BeautifulSoup Tag.
+        image_map: Optional dict mapping remote URLs to local paths.
 
     Returns:
         Markdown formatted string.
@@ -52,6 +71,7 @@ def html_to_markdown(html: str | Tag) -> str:
         html = str(html)
 
     converter = GuideMarkdownConverter(
+        image_map=image_map,
         heading_style="ATX",
         bullets="-",
         code_language="",
@@ -66,8 +86,35 @@ def html_to_markdown(html: str | Tag) -> str:
     return md.strip()
 
 
+def build_image_map(content: ExtractedContent) -> dict[str, str]:
+    """Build a mapping from remote URLs to local paths.
+
+    Prefers enhanced_path over local_path if available.
+
+    Args:
+        content: Extracted content with images.
+
+    Returns:
+        Dict mapping remote src URLs to local paths.
+    """
+    image_map = {}
+    for image in content.images:
+        src = image.get("src", "")
+        if not src:
+            continue
+
+        # Prefer enhanced path, fall back to local path
+        local_path = image.get("enhanced_path") or image.get("local_path")
+        if local_path:
+            image_map[src] = local_path
+
+    return image_map
+
+
 def generate_guide(content: ExtractedContent) -> str:
     """Generate a Markdown guide from extracted content.
+
+    Uses local image paths if available (from downloader/enhancer).
 
     Args:
         content: Structured content from extraction.
@@ -83,12 +130,22 @@ def generate_guide(content: ExtractedContent) -> str:
     try:
         parts = []
 
+        # Build image map for local path substitution
+        image_map = build_image_map(content)
+        if image_map:
+            logger.debug(f"    -> Using {len(image_map)} local image paths")
+
         # Title
         parts.append(f"# {content.title}\n")
 
         # Metadata section (optional)
         if content.metadata.get("description"):
             parts.append(f"> {content.metadata['description']}\n")
+
+        # Language indicator if translated
+        if content.metadata.get("language") and content.metadata.get("language") != "en":
+            lang = content.metadata["language"]
+            logger.debug(f"    -> Content language: {lang}")
 
         # Sections
         for section in content.sections:
@@ -103,7 +160,7 @@ def generate_guide(content: ExtractedContent) -> str:
             # Convert each content element
             for element in section_content:
                 if isinstance(element, Tag):
-                    md = html_to_markdown(element)
+                    md = html_to_markdown(element, image_map=image_map)
                     if md:
                         parts.append(md + "\n")
 

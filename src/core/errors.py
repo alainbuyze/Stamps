@@ -29,3 +29,21 @@ class GenerationError(Exception):
     """Failed to generate markdown output."""
 
     pass
+
+
+class DownloadError(Exception):
+    """Failed to download image."""
+
+    pass
+
+
+class EnhancementError(Exception):
+    """Failed to enhance image with Upscayl."""
+
+    pass
+
+
+class TranslationError(Exception):
+    """Failed to translate content."""
+
+    pass

@@ -9,7 +9,21 @@ from bs4 import BeautifulSoup
 
 @dataclass
 class ExtractedContent:
-    """Container for extracted tutorial content."""
+    """Container for extracted tutorial content.
+
+    Attributes:
+        title: Tutorial title.
+        sections: List of section dicts with heading, level, and content.
+        images: List of image dicts with:
+            - src: Remote URL
+            - alt: Alt text
+            - title: Title attribute
+            - local_path: Local file path (added by downloader)
+            - enhanced_path: Enhanced file path (added by enhancer)
+        metadata: Additional metadata dict. May include:
+            - description: Tutorial description
+            - language: Content language code (e.g., 'en', 'nl')
+    """
 
     title: str
     sections: list[dict[str, Any]] = field(default_factory=list)
