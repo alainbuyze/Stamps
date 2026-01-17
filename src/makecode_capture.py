@@ -15,6 +15,7 @@ from playwright.async_api import Browser, Page, async_playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from src.core.config import get_settings
+from src.image_trimmer import trim_image
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -93,49 +94,9 @@ async def capture_makecode_screenshot(
             logger.error(f"    -> HTTP {response.status}")
             return False
 
-        # Wait for editor to load
-        logger.debug("    -> Waiting for editor to load")
-
-        # Wait for page to be fully loaded first
+        # Wait for page to be fully loaded
         await page.wait_for_load_state("networkidle", timeout=timeout)
         logger.debug("    -> Page network idle")
-
-        # Try to find target element quickly (short timeout)
-        editor_selectors = [
-            "div.injectionDiv.pxt-renderer.classic-theme.blocklyReadOnly",
-            "#maineditor",
-            ".monaco-editor",
-            ".blocklyDiv",
-            "#blocksEditor",
-        ]
-
-        editor_element = None
-        try:
-            # Quick attempt to find target element (shorter timeout)
-            for selector in editor_selectors:
-                try:
-                    editor_element = await page.wait_for_selector(selector, timeout=5000, state="visible")
-                    logger.debug(f"    -> Found editor element (selector: {selector})")
-                    break
-                except PlaywrightTimeoutError:
-                    continue
-        except Exception as e:
-            logger.debug(f"    -> Quick element search failed: {e}")
-
-        # If target element not found quickly, take full page screenshot immediately
-        if not editor_element:
-            logger.warning("    -> Target element not found quickly, taking full page screenshot")
-
-            # Ensure output directory exists
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Take full page screenshot immediately
-            await page.screenshot(path=str(output_path), full_page=True)
-            logger.debug(f"    -> Full page screenshot saved: {output_path}")
-            return True
-
-        # If we found the element, continue with normal flow
-        logger.debug("    -> Target element found, proceeding with element screenshot")
 
         # Wait a bit more for blocks to render and language to apply
         await asyncio.sleep(3)
@@ -146,47 +107,6 @@ async def capture_makecode_screenshot(
         page_title = await page.title()
         logger.debug(f"    -> Current URL: {current_url}")
         logger.debug(f"    -> Page title: {page_title}")
-
-        # Try to force language switch by clicking language selector if present
-        try:
-            # Look for language selector or dropdown
-            lang_selectors = [
-                '[data-test="language-selector"]',
-                '.language-selector',
-                '#lang-selector',
-                'select[title*="language"]',
-                'select[title*="taal"]',
-                'button[title*="language"]',
-                'button[title*="taal"]',
-            ]
-
-            for selector in lang_selectors:
-                lang_element = await page.query_selector(selector)
-                if lang_element:
-                    logger.debug(f"    -> Found language selector: {selector}")
-                    # Try to click it and then click Dutch option
-                    await lang_element.click()
-                    await asyncio.sleep(1)
-
-                    # Look for Dutch option
-                    dutch_selectors = [
-                        'option[value="nl"]',
-                        'option:has-text("Nederlands")',
-                        'option:has-text("Dutch")',
-                        'button:has-text("Nederlands")',
-                        'button:has-text("Dutch")',
-                    ]
-
-                    for dutch_selector in dutch_selectors:
-                        dutch_option = await page.query_selector(dutch_selector)
-                        if dutch_option:
-                            await dutch_option.click()
-                            logger.debug(f"    -> Clicked Dutch option: {dutch_selector}")
-                            await asyncio.sleep(2)  # Wait for language to switch
-                            break
-                    break
-        except Exception as lang_error:
-            logger.debug(f"    -> Language selector not found or error: {lang_error}")
 
         # Check page content for language indicators
         try:
@@ -210,21 +130,22 @@ async def capture_makecode_screenshot(
         # Ensure output directory exists
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Take screenshot
-        # Try to screenshot just the editor area first
+        # Take full page screenshot
+        await page.screenshot(path=str(output_path), full_page=True)
+        logger.debug(f"    -> Full page screenshot saved: {output_path}")
+
+        # Trim the screenshot to remove whitespace and add border
         try:
-            if editor_element:
-                await editor_element.screenshot(path=str(output_path))
-                logger.debug(f"    -> Screenshot saved (element): {output_path}")
-            else:
-                # Fall back to full page screenshot
-                await page.screenshot(path=str(output_path), full_page=True)
-                logger.debug(f"    -> Screenshot saved (full page): {output_path}")
-        except Exception as screenshot_error:
-            logger.warning(f"    -> Element screenshot failed: {screenshot_error}")
-            # Fall back to full page screenshot
-            await page.screenshot(path=str(output_path), full_page=True)
-            logger.debug(f"    -> Screenshot saved (full page fallback): {output_path}")
+            trimmed_path = trim_image(
+                input_path=output_path,
+                output_path=output_path,  # Overwrite the original
+                border_width=1,  # Add 1px black border
+                border_color="black"
+            )
+            logger.debug(f"    -> Screenshot trimmed and bordered: {trimmed_path}")
+        except Exception as trim_error:
+            logger.warning(f"    -> Failed to trim screenshot: {trim_error}")
+            # Continue with untrimmed screenshot if trimming fails
 
         return True
 

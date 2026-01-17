@@ -192,9 +192,9 @@ if __name__ == "__main__":
     import sys
 
     parser = argparse.ArgumentParser(description="Trim whitespace from images")
-    parser.add_argument("input", help="Input image path")
-    parser.add_argument("output", nargs="?", help="Output image path (optional)")
-    parser.add_argument("-b", "--border", type=int, default=0, help="Border width in pixels")
+    parser.add_argument("input", nargs="?", default=r"D:\Coderdojo\test_output\test_makecode.png", help="Input image path")
+    parser.add_argument("output", default=r"D:\Coderdojo\test_output\test_makecode.png",nargs="?", help="Output image path (optional)")
+    parser.add_argument("-b", "--border", type=int, default=1, help="Border width in pixels")
     parser.add_argument(
         "-c", "--color", default="black", help="Border color (default: black)"
     )
