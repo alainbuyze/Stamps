@@ -59,6 +59,32 @@ uv sync
 
 Installs all Python packages including dev dependencies (pytest, ruff, httpx, etc.) as defined in `pyproject.toml`.
 
+## 2.1. Setup Logging Configuration
+
+Add logging configuration to your `.env.app` file:
+
+```env
+# Logging Configuration - Recommended Defaults
+LOG_DIR=logs
+LOG_LEVEL=INFO
+LOG_MAX_SIZE_MB=2
+LOG_BACKUP_COUNT=5
+LOG_FORMAT=%(asctime)s - %(name)s - %(levelname)s - %(message)s [%(funcName)s:%(lineno)d]
+LOG_FILE_NAME=app.log
+LOG_ERROR_FILE_NAME=errors.log
+```
+
+This creates the following directory structure:
+```
+project-root/
+├── output/
+│   └── logs/
+│       ├── app.log           # Main application logs
+│       ├── app.log.1         # Rotated backup
+│       ├── errors.log        # Error logs in JSONL format
+│       └── errors.log.1      # Error log backups
+```
+
 ## 3. Add Common Dependencies (Optional)
 
 Add essential packages for a typical Python project:
@@ -137,6 +163,46 @@ uv run python main.py
 **Linux/macOS:**
 ```bash
 uv run python main.py
+```
+
+## 4.1. Application Entry Point with Logging
+
+Create a main application file that initializes logging:
+
+```python
+# main.py
+import logging
+from src.core.logging import setup_logging, log_error
+from src.core.config import get_settings
+
+def main():
+    """Main application entry point."""
+    # Initialize logging first
+    setup_logging()
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info("Application starting up")
+        
+        # Your application logic here
+        settings = get_settings()
+        logger.info(f"Output directory: {settings.output_path}")
+        logger.info(f"Log directory: {settings.log_path}")
+        
+        # Start your application
+        start_application()
+        
+        logger.info("Application started successfully")
+        
+    except Exception as e:
+        log_error(e, context={'phase': 'startup'})
+        logger.error("Failed to start application")
+        return 1
+    
+    return 0
+
+if __name__ == "__main__":
+    exit(main())
 ```
 
 ## 5. Run Tests
@@ -233,6 +299,16 @@ class Settings(BaseSettings):
     OUTPUT_ROOT_DIR: str = Field(default="./output", description="Root directory for all output files")
     OUTPUT_DIR: str = Field(default="./output", description="Output directory for generated content")
     CACHE_DIR: str = Field(default="./cache", description="Cache directory for temporary files")
+    LOG_DIR: str = Field(default="logs", description="Logs directory within output")
+    LOG_LEVEL: str = Field(default="INFO", description="Logging level")
+    LOG_MAX_SIZE_MB: int = Field(default=2, description="Max log file size in MB")
+    LOG_BACKUP_COUNT: int = Field(default=5, description="Number of log backup files")
+    LOG_FORMAT: str = Field(
+        default="%(asctime)s - %(name)s - %(levelname)s - %(message)s [%(funcName)s:%(lineno)d]",
+        description="Log message format"
+    )
+    LOG_FILE_NAME: str = Field(default="app.log", description="Main log file name")
+    LOG_ERROR_FILE_NAME: str = Field(default="errors.log", description="Error log file name")
 
     # Application-specific settings
     API_KEY: str = Field(..., description="API key")
@@ -253,7 +329,95 @@ class Settings(BaseSettings):
         """Get CACHE_DIR as Path object for cross-platform compatibility."""
         return Path(self.CACHE_DIR)
 
+    @property
+    def log_path(self) -> Path:
+        """Get log directory path for cross-platform compatibility."""
+        return self.output_root_path / self.LOG_DIR
+
 settings = Settings()
+```
+
+## 2.2. Initialize Logging in Your Application
+
+Create a logging setup module or add to your main application:
+
+```python
+# src/core/logging.py or main.py
+import logging
+import logging.handlers
+from pathlib import Path
+from pydantic_settings import BaseSettings
+
+def setup_logging():
+    """Initialize logging with file rotation and structured error handling."""
+    settings = get_settings()
+    
+    # Create log directory
+    log_dir = settings.log_path
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Setup main log file with rotation
+    log_file = log_dir / settings.LOG_FILE_NAME
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file,
+        maxBytes=settings.LOG_MAX_SIZE_MB * 1024 * 1024,
+        backupCount=settings.LOG_BACKUP_COUNT,
+        encoding='utf-8'
+    )
+    
+    # Setup error log file (JSONL format)
+    error_file = log_dir / settings.LOG_ERROR_FILE_NAME
+    error_handler = logging.handlers.RotatingFileHandler(
+        error_file,
+        maxBytes=settings.LOG_MAX_SIZE_MB * 1024 * 1024,
+        backupCount=settings.LOG_BACKUP_COUNT,
+        encoding='utf-8'
+    )
+    
+    # Configure formatters
+    formatter = logging.Formatter(settings.LOG_FORMAT)
+    file_handler.setFormatter(formatter)
+    error_handler.setFormatter(formatter)
+    
+    # Setup root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(error_handler)
+    
+    # Also add console handler for development
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+def log_error(exception: Exception, context: dict = None, severity: str = 'ERROR'):
+    """Log exception with structured context."""
+    import json
+    import traceback
+    from datetime import datetime
+    
+    settings = get_settings()
+    error_file = settings.log_path / settings.LOG_ERROR_FILE_NAME
+    
+    error_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'error_type': type(exception).__name__,
+        'error_message': str(exception),
+        'traceback': traceback.format_exc(),
+        'context': context or {},
+        'severity': severity
+    }
+    
+    # Write to error log file
+    with open(error_file, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(error_entry) + '\n')
+    
+    # Also log to standard logger
+    logger = logging.getLogger(__name__)
+    logger.error(f"{exception}: {context}")
+
+# Initialize logging when module is imported
+setup_logging()
 ```
 
 ## Windows Compatibility Guide
