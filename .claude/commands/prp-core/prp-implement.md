@@ -369,7 +369,80 @@ Compare the original investigation's assessment with what actually happened:
 - [ ] Merge when approved
 ```
 
-### 5.3 Update Source PRD (if applicable)
+### 5.3 Update README.md
+
+**CRITICAL: Every release MUST read and update or create the README.md file.**
+
+1. **Read existing README.md** (if it exists):
+   ```bash
+   cat README.md
+   ```
+
+2. **Update README.md** based on changes made:
+   - **New features**: Add to features list
+   - **New dependencies**: Update installation instructions
+   - **New CLI commands**: Add to usage examples
+   - **Configuration changes**: Update environment setup
+   - **Breaking changes**: Add migration notes
+
+3. **Create README.md** if it doesn't exist:
+   ```markdown
+   # {Project Name}
+
+   ## Description
+   
+   Brief description of what this project does.
+
+   ## Installation
+
+   ```bash
+   # Clone and install dependencies
+   git clone {repo-url}
+   cd {project-name}
+   {install-command}
+
+   # Configure environment
+   cp .env.example .env.local
+   # Edit .env.local with your settings
+   ```
+
+   ## Usage
+
+   ```bash
+   {usage-examples}
+   ```
+
+   ## Features
+
+   - {feature-1}
+   - {feature-2}
+
+   ## Configuration
+
+   See `.env.app` for default configuration. Override in `.env.local`.
+
+   ## Development
+
+   ```bash
+   # Run tests
+   {test-command}
+
+   # Code quality
+   {lint-command}
+   ```
+
+   ## License
+
+   {license}
+   ```
+
+4. **Validate README.md**:
+   - All installation steps work
+   - Usage examples are current
+   - Feature list matches implementation
+   - Configuration documentation is accurate
+
+### 5.4 Update Source PRD (if applicable)
 
 **Check if plan was generated from a PRD:**
 - Look in the plan file for `Source PRD:` reference
@@ -393,6 +466,8 @@ mv $ARGUMENTS .claude/PRPs/plans/completed/
 **PHASE_5_CHECKPOINT:**
 
 - [ ] Report created at `.claude/PRPs/reports/`
+- [ ] README.md read and updated (or created if missing)
+- [ ] README.md validated (installation, usage, features accurate)
 - [ ] PRD updated (if applicable) - phase marked complete
 - [ ] Plan moved to completed folder
 
@@ -504,5 +579,6 @@ To continue: `/prp-plan {prd-path}`
 - **LINT_PASS**: Lint command exits 0 (warnings OK)
 - **TESTS_PASS**: Test command all green
 - **BUILD_PASS**: Build command succeeds
+- **README_UPDATED**: README.md read, updated/created, and validated
 - **REPORT_CREATED**: Implementation report exists
 - **PLAN_ARCHIVED**: Original plan moved to completed
