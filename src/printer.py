@@ -1,12 +1,17 @@
-"""PDF printer for converting markdown guides to printable PDFs."""
+"""PDF printer for converting markdown guides to printable PDFs.
+
+Uses xhtml2pdf for HTML to PDF conversion - a pure Python solution
+that works reliably on Windows without external dependencies.
+"""
 
 import inspect
 import logging
 import re
+from io import BytesIO
 from pathlib import Path
 
 from markdown import markdown
-from weasyprint import CSS, HTML
+from xhtml2pdf import pisa
 
 from src.core.config import get_settings
 from src.core.errors import GenerationError
@@ -206,9 +211,10 @@ def get_default_css() -> str:
 
     Returns:
         CSS string with A4 portrait layout rules.
+        Note: xhtml2pdf supports a subset of CSS 2.1
     """
     return """
-/* A4 Portrait page setup */
+/* A4 Portrait page setup - xhtml2pdf syntax */
 @page {
     size: A4 portrait;
     margin: 15mm 20mm;
@@ -216,10 +222,10 @@ def get_default_css() -> str:
 
 /* General typography */
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: Helvetica, Arial, sans-serif;
     font-size: 11pt;
     line-height: 1.4;
-    color: #333;
+    color: #333333;
 }
 
 /* Title page */
@@ -272,27 +278,25 @@ li {
 
 /* Code blocks */
 pre {
-    background: #f5f5f5;
-    border: 1pt solid #ddd;
+    background-color: #f5f5f5;
+    border: 1pt solid #dddddd;
     border-left: 3pt solid #3498db;
     padding: 3mm;
-    font-family: 'Consolas', 'Courier New', monospace;
+    font-family: Courier, monospace;
     font-size: 9pt;
     page-break-inside: avoid;
     margin: 3mm 0;
-    overflow-x: auto;
 }
 
 code {
-    font-family: 'Consolas', 'Courier New', monospace;
+    font-family: Courier, monospace;
     font-size: 10pt;
-    background: #f5f5f5;
+    background-color: #f5f5f5;
     padding: 1mm 2mm;
-    border-radius: 1mm;
 }
 
 pre code {
-    background: transparent;
+    background-color: transparent;
     padding: 0;
 }
 
@@ -304,27 +308,21 @@ img {
     margin: 3mm auto;
 }
 
-/* Construction diagrams: 2 per page */
+/* Construction diagrams */
 .construction-step {
     width: 100%;
     page-break-inside: avoid;
     margin-bottom: 8mm;
     border: 1pt solid #ecf0f1;
     padding: 3mm;
-    background: #fafafa;
+    background-color: #fafafa;
 }
 
 .construction-step img {
     max-width: 100%;
     max-height: 110mm;
-    object-fit: contain;
     display: block;
     margin: 0 auto;
-}
-
-/* Ensure 2 construction steps fit on one page */
-.construction-step:nth-child(2n+1) {
-    margin-bottom: 5mm;
 }
 
 /* Connection diagrams: full page */
@@ -338,7 +336,6 @@ img {
 .connection-diagram img {
     max-width: 100%;
     max-height: 250mm;
-    object-fit: contain;
     display: block;
     margin: 0 auto;
 }
@@ -353,19 +350,9 @@ img {
 .code-image img {
     max-width: 100%;
     max-height: 180mm;
-    object-fit: contain;
     display: block;
     margin: 0 auto;
-    border: 1pt solid #ddd;
-}
-
-/* QR codes */
-img[src*="/qrcodes/"] {
-    width: 20mm !important;
-    height: 20mm !important;
-    display: inline-block !important;
-    margin: 0 2mm !important;
-    vertical-align: middle;
+    border: 1pt solid #dddddd;
 }
 
 /* Tables */
@@ -378,19 +365,15 @@ table {
 }
 
 th, td {
-    border: 1pt solid #ddd;
+    border: 1pt solid #dddddd;
     padding: 2mm;
     text-align: left;
 }
 
 th {
-    background: #3498db;
+    background-color: #3498db;
     color: white;
     font-weight: bold;
-}
-
-tr:nth-child(even) {
-    background: #f9f9f9;
 }
 
 /* Blockquotes */
@@ -398,7 +381,7 @@ blockquote {
     border-left: 3pt solid #3498db;
     padding-left: 5mm;
     margin: 3mm 0;
-    color: #555;
+    color: #555555;
     font-style: italic;
 }
 
@@ -408,22 +391,37 @@ a {
     text-decoration: none;
 }
 
-a:after {
-    content: " (" attr(href) ")";
-    font-size: 8pt;
-    color: #666;
-}
-
 /* Prevent page breaks in bad places */
 h1, h2, h3, h4, h5, h6 {
     page-break-after: avoid;
 }
-
-p, li, blockquote {
-    orphans: 3;
-    widows: 3;
-}
 """
+
+
+def link_callback(uri: str, rel: str) -> str:
+    """Callback for xhtml2pdf to resolve resource URIs.
+
+    Args:
+        uri: The URI to resolve (image path, etc.)
+        rel: Relative path (unused)
+
+    Returns:
+        Resolved path to the resource.
+    """
+    # Handle file:// URIs
+    if uri.startswith("file://"):
+        # Convert file:// URI to local path
+        if uri.startswith("file:///"):
+            # Windows absolute path: file:///C:/path
+            return uri[8:]  # Remove 'file:///'
+        return uri[7:]  # Remove 'file://'
+
+    # Handle absolute paths
+    if Path(uri).is_absolute():
+        return uri
+
+    # Return as-is for relative paths (xhtml2pdf will resolve)
+    return uri
 
 
 def markdown_to_pdf(
@@ -458,18 +456,20 @@ def markdown_to_pdf(
         html_content = markdown_to_html(md_content, css_path)
         logger.debug(f"    -> Generated {len(html_content)} bytes of HTML")
 
-        # Generate PDF using WeasyPrint
-        html = HTML(string=html_content, base_url=base_url)
+        # Generate PDF using xhtml2pdf
+        with open(output_path, "wb") as pdf_file:
+            # Create PDF
+            pisa_status = pisa.CreatePDF(
+                src=html_content,
+                dest=pdf_file,
+                encoding="utf-8",
+                link_callback=link_callback,
+            )
 
-        # Add custom CSS if provided
-        stylesheets = []
-        if css_path and css_path.exists():
-            stylesheets.append(CSS(filename=str(css_path)))
+            if pisa_status.err:
+                raise GenerationError(f"xhtml2pdf reported {pisa_status.err} errors")
 
-        # Write PDF
-        html.write_pdf(output_path, stylesheets=stylesheets)
         logger.debug(f"    -> PDF saved: {output_path}")
-
         return output_path
 
     except Exception as e:

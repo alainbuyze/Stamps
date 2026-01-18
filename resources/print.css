@@ -1,5 +1,6 @@
 /* CoderDojo Guide Print Stylesheet */
 /* Optimized for A4 portrait format with 2 construction diagrams per page */
+/* Compatible with xhtml2pdf (CSS 2.1 subset) */
 
 /* A4 Portrait page setup */
 @page {
@@ -9,10 +10,10 @@
 
 /* General typography */
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: Helvetica, Arial, sans-serif;
     font-size: 11pt;
     line-height: 1.4;
-    color: #333;
+    color: #333333;
 }
 
 /* Title page */
@@ -65,27 +66,25 @@ li {
 
 /* Code blocks */
 pre {
-    background: #f5f5f5;
-    border: 1pt solid #ddd;
+    background-color: #f5f5f5;
+    border: 1pt solid #dddddd;
     border-left: 3pt solid #3498db;
     padding: 3mm;
-    font-family: 'Consolas', 'Courier New', monospace;
+    font-family: Courier, monospace;
     font-size: 9pt;
     page-break-inside: avoid;
     margin: 3mm 0;
-    overflow-x: auto;
 }
 
 code {
-    font-family: 'Consolas', 'Courier New', monospace;
+    font-family: Courier, monospace;
     font-size: 10pt;
-    background: #f5f5f5;
+    background-color: #f5f5f5;
     padding: 1mm 2mm;
-    border-radius: 1mm;
 }
 
 pre code {
-    background: transparent;
+    background-color: transparent;
     padding: 0;
 }
 
@@ -104,20 +103,14 @@ img {
     margin-bottom: 8mm;
     border: 1pt solid #ecf0f1;
     padding: 3mm;
-    background: #fafafa;
+    background-color: #fafafa;
 }
 
 .construction-step img {
     max-width: 100%;
     max-height: 110mm;
-    object-fit: contain;
     display: block;
     margin: 0 auto;
-}
-
-/* Ensure 2 construction steps fit on one page */
-.construction-step:nth-child(2n+1) {
-    margin-bottom: 5mm;
 }
 
 /* Connection diagrams: full page */
@@ -131,7 +124,6 @@ img {
 .connection-diagram img {
     max-width: 100%;
     max-height: 250mm;
-    object-fit: contain;
     display: block;
     margin: 0 auto;
 }
@@ -146,18 +138,17 @@ img {
 .code-image img {
     max-width: 100%;
     max-height: 180mm;
-    object-fit: contain;
     display: block;
     margin: 0 auto;
-    border: 1pt solid #ddd;
+    border: 1pt solid #dddddd;
 }
 
-/* QR codes */
-img[src*="/qrcodes/"] {
-    width: 20mm !important;
-    height: 20mm !important;
-    display: inline-block !important;
-    margin: 0 2mm !important;
+/* QR codes - use class instead of attribute selector */
+.qrcode {
+    width: 20mm;
+    height: 20mm;
+    display: inline-block;
+    margin: 0 2mm;
     vertical-align: middle;
 }
 
@@ -171,19 +162,15 @@ table {
 }
 
 th, td {
-    border: 1pt solid #ddd;
+    border: 1pt solid #dddddd;
     padding: 2mm;
     text-align: left;
 }
 
 th {
-    background: #3498db;
+    background-color: #3498db;
     color: white;
     font-weight: bold;
-}
-
-tr:nth-child(even) {
-    background: #f9f9f9;
 }
 
 /* Blockquotes */
@@ -191,7 +178,7 @@ blockquote {
     border-left: 3pt solid #3498db;
     padding-left: 5mm;
     margin: 3mm 0;
-    color: #555;
+    color: #555555;
     font-style: italic;
 }
 
@@ -201,18 +188,7 @@ a {
     text-decoration: none;
 }
 
-a:after {
-    content: " (" attr(href) ")";
-    font-size: 8pt;
-    color: #666;
-}
-
 /* Prevent page breaks in bad places */
 h1, h2, h3, h4, h5, h6 {
     page-break-after: avoid;
-}
-
-p, li, blockquote {
-    orphans: 3;
-    widows: 3;
 }

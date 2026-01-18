@@ -17,9 +17,11 @@ from src.enhancer import enhance_all_images
 from src.extractor import ContentExtractor
 from src.generator import generate_guide, save_guide
 from src.makecode_replacer import replace_makecode_screenshots
-from src.printer import markdown_file_to_pdf
 from src.scraper import fetch_page, get_browser
 from src.translator import translate_content
+
+# Note: printer module imported lazily in print_guide() to avoid WeasyPrint GTK3 dependency
+# when running commands that don't need PDF generation
 
 console = Console()
 
@@ -321,7 +323,10 @@ def print_guide(
         uv run python -m src.cli print --input output/case-01.md
         uv run python -m src.cli print -i output/case-01.md -o guides/case-01.pdf
         uv run python -m src.cli print -i output/case-01.md --css custom.css
+
     """
+    from src.printer import markdown_file_to_pdf
+
     settings = get_settings()
 
     # Setup logging
