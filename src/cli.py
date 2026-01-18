@@ -17,6 +17,7 @@ from src.enhancer import enhance_all_images
 from src.extractor import ContentExtractor
 from src.generator import generate_guide, save_guide
 from src.makecode_replacer import replace_makecode_screenshots
+from src.printer import markdown_file_to_pdf
 from src.scraper import fetch_page, get_browser
 from src.translator import translate_content
 
@@ -281,6 +282,81 @@ def sources() -> None:
             "  Nezha Inventor's Kit tutorials",
             title="Sources",
             border_style="blue",
+        )
+    )
+
+
+@cli.command()
+@click.option(
+    "--input",
+    "-i",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Markdown file to convert to PDF",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    help="Output PDF path (defaults to same name with .pdf extension)",
+)
+@click.option(
+    "--css",
+    type=click.Path(exists=True, path_type=Path),
+    help="Custom CSS file for styling (optional)",
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
+def print_guide(
+    input: Path, output: Path | None, css: Path | None, verbose: bool
+) -> None:
+    """Convert a markdown guide to printable PDF.
+
+    Generates a PDF with A4 portrait layout optimized for printing.
+    Automatically detects and optimizes layout for different content types:
+    - Construction diagrams: 2 per page
+    - Connection diagrams: full page
+    - Code screenshots: optimized size
+
+    Example usage:
+        uv run python -m src.cli print --input output/case-01.md
+        uv run python -m src.cli print -i output/case-01.md -o guides/case-01.pdf
+        uv run python -m src.cli print -i output/case-01.md --css custom.css
+    """
+    settings = get_settings()
+
+    # Setup logging
+    log_level = "DEBUG" if verbose else settings.LOG_LEVEL
+    setup_logging(log_level)
+
+    # Use default CSS if not provided
+    if css is None:
+        css = Path(__file__).parent.parent / "resources" / "print.css"
+        if not css.exists():
+            css = None  # Fall back to embedded CSS
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("Converting to PDF...", total=None)
+
+        try:
+            pdf_path = markdown_file_to_pdf(input, output, css)
+            progress.update(task, description="PDF generated")
+        except Exception as e:
+            console.print(f"[red]Error generating PDF:[/red] {e}")
+            raise SystemExit(1)
+
+    # Success message
+    console.print(
+        Panel(
+            f"[green]PDF generated successfully![/green]\n\n"
+            f"[bold]Input:[/bold] {input}\n"
+            f"[bold]Output:[/bold] {pdf_path}",
+            title="Success",
+            border_style="green",
         )
     )
 

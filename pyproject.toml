@@ -16,6 +16,8 @@ dependencies = [
     "python-dotenv>=1.0",
     "deep-translator>=1.11",
     "qrcode[pil]>=8.0",
+    "weasyprint>=60.0",
+    "markdown>=3.5",
 ]
 
 [project.optional-dependencies]
