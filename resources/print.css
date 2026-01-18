@@ -1,0 +1,218 @@
+/* CoderDojo Guide Print Stylesheet */
+/* Optimized for A4 portrait format with 2 construction diagrams per page */
+
+/* A4 Portrait page setup */
+@page {
+    size: A4 portrait;
+    margin: 15mm 20mm;
+}
+
+/* General typography */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 11pt;
+    line-height: 1.4;
+    color: #333;
+}
+
+/* Title page */
+h1 {
+    font-size: 28pt;
+    font-weight: bold;
+    text-align: center;
+    page-break-after: always;
+    margin-top: 50mm;
+    color: #2c3e50;
+}
+
+/* Section headers */
+h2 {
+    font-size: 18pt;
+    font-weight: bold;
+    page-break-before: always;
+    page-break-after: avoid;
+    margin-top: 0;
+    margin-bottom: 8mm;
+    color: #2c3e50;
+    border-bottom: 2pt solid #3498db;
+    padding-bottom: 2mm;
+}
+
+h3 {
+    font-size: 14pt;
+    font-weight: bold;
+    page-break-after: avoid;
+    margin-top: 5mm;
+    margin-bottom: 3mm;
+    color: #34495e;
+}
+
+/* Paragraphs */
+p {
+    margin-bottom: 3mm;
+    text-align: justify;
+}
+
+/* Lists */
+ul, ol {
+    margin-bottom: 3mm;
+    padding-left: 8mm;
+}
+
+li {
+    margin-bottom: 2mm;
+}
+
+/* Code blocks */
+pre {
+    background: #f5f5f5;
+    border: 1pt solid #ddd;
+    border-left: 3pt solid #3498db;
+    padding: 3mm;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 9pt;
+    page-break-inside: avoid;
+    margin: 3mm 0;
+    overflow-x: auto;
+}
+
+code {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 10pt;
+    background: #f5f5f5;
+    padding: 1mm 2mm;
+    border-radius: 1mm;
+}
+
+pre code {
+    background: transparent;
+    padding: 0;
+}
+
+/* Images - default */
+img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 3mm auto;
+}
+
+/* Construction diagrams: 2 per page */
+.construction-step {
+    width: 100%;
+    page-break-inside: avoid;
+    margin-bottom: 8mm;
+    border: 1pt solid #ecf0f1;
+    padding: 3mm;
+    background: #fafafa;
+}
+
+.construction-step img {
+    max-width: 100%;
+    max-height: 110mm;
+    object-fit: contain;
+    display: block;
+    margin: 0 auto;
+}
+
+/* Ensure 2 construction steps fit on one page */
+.construction-step:nth-child(2n+1) {
+    margin-bottom: 5mm;
+}
+
+/* Connection diagrams: full page */
+.connection-diagram {
+    page-break-before: always;
+    page-break-after: always;
+    page-break-inside: avoid;
+    text-align: center;
+}
+
+.connection-diagram img {
+    max-width: 100%;
+    max-height: 250mm;
+    object-fit: contain;
+    display: block;
+    margin: 0 auto;
+}
+
+/* Code screenshots */
+.code-image {
+    page-break-inside: avoid;
+    margin: 5mm 0;
+    text-align: center;
+}
+
+.code-image img {
+    max-width: 100%;
+    max-height: 180mm;
+    object-fit: contain;
+    display: block;
+    margin: 0 auto;
+    border: 1pt solid #ddd;
+}
+
+/* QR codes */
+img[src*="/qrcodes/"] {
+    width: 20mm !important;
+    height: 20mm !important;
+    display: inline-block !important;
+    margin: 0 2mm !important;
+    vertical-align: middle;
+}
+
+/* Tables */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 3mm 0;
+    page-break-inside: avoid;
+    font-size: 10pt;
+}
+
+th, td {
+    border: 1pt solid #ddd;
+    padding: 2mm;
+    text-align: left;
+}
+
+th {
+    background: #3498db;
+    color: white;
+    font-weight: bold;
+}
+
+tr:nth-child(even) {
+    background: #f9f9f9;
+}
+
+/* Blockquotes */
+blockquote {
+    border-left: 3pt solid #3498db;
+    padding-left: 5mm;
+    margin: 3mm 0;
+    color: #555;
+    font-style: italic;
+}
+
+/* Links */
+a {
+    color: #3498db;
+    text-decoration: none;
+}
+
+a:after {
+    content: " (" attr(href) ")";
+    font-size: 8pt;
+    color: #666;
+}
+
+/* Prevent page breaks in bad places */
+h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid;
+}
+
+p, li, blockquote {
+    orphans: 3;
+    widows: 3;
+}

@@ -60,6 +60,14 @@ class Settings(BaseSettings):
         default=True, description="Enable MakeCode screenshot replacement"
     )
 
+    # Print/PDF settings
+    PDF_PAGE_SIZE: str = Field(default="A4", description="PDF page size")
+    PDF_PAGE_ORIENTATION: str = Field(default="portrait", description="PDF page orientation")
+    PDF_MARGIN: str = Field(default="15mm 20mm", description="PDF page margins")
+    PDF_CONSTRUCTION_PER_PAGE: int = Field(
+        default=2, description="Number of construction diagrams per page"
+    )
+
 
 # Singleton pattern for settings
 _settings: Settings | None = None
