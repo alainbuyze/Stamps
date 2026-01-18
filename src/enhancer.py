@@ -195,8 +195,11 @@ def enhance_all_images(content: ExtractedContent, output_dir: Path) -> Extracted
         logger.warning("    -> Upscayl not found, skipping all enhancements")
         return content
 
-    # Find images with local paths
-    images_to_enhance = [img for img in content.images if img.get("local_path")]
+    # Find images with local paths (skip MakeCode-replaced images - they're already high quality)
+    images_to_enhance = [
+        img for img in content.images
+        if img.get("local_path") and not img.get("replaced_with_dutch")
+    ]
 
     if not images_to_enhance:
         logger.debug("    -> No local images to enhance")

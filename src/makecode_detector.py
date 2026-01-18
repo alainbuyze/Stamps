@@ -84,11 +84,18 @@ class MakeCodeImageDetector:
         title = image.get("title", "").lower()
         src = image.get("src", "").lower()
 
-        text_to_check = f"{alt} {title} {src}"
+        # For src, only check the filename portion to avoid false positives
+        # from path components like "building-blocks"
+        if src:
+            # Extract filename from URL/path
+            filename = src.split("/")[-1].split("?")[0].lower()
+        else:
+            filename = ""
 
+        # Check alt and title fully, but only filename for src
         for keyword in self.CODE_IMAGE_KEYWORDS:
-            if keyword in text_to_check:
-                logger.debug(f"Image {index} matched keyword '{keyword}': {alt or title or src}")
+            if keyword in alt or keyword in title or keyword in filename:
+                logger.debug(f"Image {index} matched keyword '{keyword}': {alt or title or filename}")
                 return True
 
         return False

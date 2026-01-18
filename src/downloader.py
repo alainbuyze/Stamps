@@ -139,6 +139,11 @@ async def download_images(content: ExtractedContent, output_dir: Path) -> Extrac
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             for idx, image in enumerate(content.images):
+                # Skip images already replaced with Dutch MakeCode screenshots
+                if image.get("replaced_with_dutch"):
+                    logger.debug(f"    -> Skipping image {idx}: already replaced with Dutch MakeCode screenshot")
+                    continue
+
                 url = image.get("src", "")
                 if not url:
                     continue
