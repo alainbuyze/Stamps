@@ -22,7 +22,10 @@ class Settings(BaseSettings):
     # Scraping settings
     RATE_LIMIT_SECONDS: float = Field(default=2.0, description="Delay between requests")
     BROWSER_HEADLESS: bool = Field(default=True, description="Run browser in headless mode")
-    BROWSER_TIMEOUT: int = Field(default=30000, description="Browser timeout in milliseconds")
+    BROWSER_TIMEOUT: int = Field(default=60000, description="Browser timeout in milliseconds")
+    SCRAPE_MAX_RETRIES: int = Field(default=3, description="Maximum retry attempts for failed scrapes")
+    SCRAPE_RETRY_DELAY: float = Field(default=5.0, description="Initial delay between retries in seconds")
+    SCRAPE_RETRY_BACKOFF: float = Field(default=2.0, description="Backoff multiplier for retry delays")
 
     # Logging settings
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")

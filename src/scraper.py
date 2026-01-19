@@ -34,11 +34,12 @@ async def get_browser() -> AsyncGenerator[Browser, None]:
             logger.debug("    -> Browser closed")
 
 
-async def fetch_page(url: str) -> str:
-    """Fetch and render a web page using Playwright.
+async def _fetch_page_once(url: str, timeout: int | None = None) -> str:
+    """Single attempt to fetch a page.
 
     Args:
         url: The URL to fetch.
+        timeout: Optional timeout override in milliseconds.
 
     Returns:
         The fully rendered HTML content of the page.
@@ -48,14 +49,14 @@ async def fetch_page(url: str) -> str:
         PageTimeoutError: If the page load times out.
         ScrapingError: For other scraping errors.
     """
-    logger.debug(f" * {inspect.currentframe().f_code.co_name} > Fetching: {url}")
+    effective_timeout = timeout or settings.BROWSER_TIMEOUT
 
     async with get_browser() as browser:
         page = await browser.new_page()
         logger.debug("    -> Created new page")
 
         try:
-            response = await page.goto(url, timeout=settings.BROWSER_TIMEOUT)
+            response = await page.goto(url, timeout=effective_timeout)
 
             if response is None:
                 raise ScrapingError(f"No response received for URL: {url}")
@@ -66,9 +67,37 @@ async def fetch_page(url: str) -> str:
             if response.status >= 400:
                 raise ScrapingError(f"HTTP {response.status} for URL: {url}")
 
-            # Wait for content to load
-            await page.wait_for_load_state("networkidle")
-            logger.debug("    -> Page loaded, network idle")
+            # Wait for DOM to be ready (faster than networkidle)
+            await page.wait_for_load_state("domcontentloaded", timeout=effective_timeout)
+            logger.debug("    -> DOM content loaded")
+
+            # For Docusaurus/React sites, wait for main content to render
+            # Try multiple selectors that indicate content is ready
+            content_selectors = [
+                "article",  # Docusaurus main content
+                ".markdown",  # Docusaurus markdown content
+                "main",  # Generic main content
+                ".theme-doc-markdown",  # Docusaurus doc content
+            ]
+
+            content_loaded = False
+            for selector in content_selectors:
+                try:
+                    await page.wait_for_selector(selector, timeout=5000)
+                    logger.debug(f"    -> Content selector '{selector}' found")
+                    content_loaded = True
+                    break
+                except TimeoutError:
+                    continue
+
+            if not content_loaded:
+                # Fallback: just wait a bit for JS to execute
+                logger.debug("    -> No content selector found, waiting for JS execution")
+                await asyncio.sleep(1)
+
+            # Small additional delay for any remaining rendering
+            await asyncio.sleep(0.5)
+            logger.debug("    -> Page ready")
 
             content = await page.content()
             logger.debug(f"    -> Retrieved {len(content)} bytes of HTML")
@@ -76,16 +105,82 @@ async def fetch_page(url: str) -> str:
             return content
 
         except TimeoutError as e:
-            error_context = {"url": url, "timeout": settings.BROWSER_TIMEOUT}
-            logger.error(f"Page load timeout: {e} | Context: {error_context}")
+            error_context = {"url": url, "timeout": effective_timeout}
+            logger.debug(f"Page load timeout: {e} | Context: {error_context}")
             raise PageTimeoutError(f"Timeout loading page: {url}") from e
 
         except Exception as e:
             if isinstance(e, (PageNotFoundError, PageTimeoutError, ScrapingError)):
                 raise
             error_context = {"url": url, "error_type": type(e).__name__}
-            logger.error(f"Scraping failed: {e} | Context: {error_context}")
+            logger.debug(f"Scraping attempt failed: {e} | Context: {error_context}")
             raise ScrapingError(f"Failed to scrape {url}: {e}") from e
+
+
+async def fetch_page(url: str) -> str:
+    """Fetch and render a web page using Playwright with retry logic.
+
+    Implements exponential backoff retry mechanism for transient failures.
+    Non-retryable errors (404, permanent failures) are raised immediately.
+
+    Args:
+        url: The URL to fetch.
+
+    Returns:
+        The fully rendered HTML content of the page.
+
+    Raises:
+        PageNotFoundError: If the page returns a 404 status.
+        PageTimeoutError: If all retry attempts fail due to timeout.
+        ScrapingError: For other scraping errors after all retries.
+    """
+    logger.debug(f" * {inspect.currentframe().f_code.co_name} > Fetching: {url}")
+
+    max_retries = settings.SCRAPE_MAX_RETRIES
+    retry_delay = settings.SCRAPE_RETRY_DELAY
+    backoff = settings.SCRAPE_RETRY_BACKOFF
+
+    last_exception: Exception | None = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            # Increase timeout for retries
+            timeout = settings.BROWSER_TIMEOUT
+            if attempt > 0:
+                timeout = int(timeout * (1 + attempt * 0.5))  # 50% increase per retry
+                logger.info(
+                    f"    -> Retry {attempt}/{max_retries} for {url} (timeout: {timeout}ms)"
+                )
+
+            return await _fetch_page_once(url, timeout=timeout)
+
+        except PageNotFoundError:
+            # Don't retry 404 errors
+            raise
+
+        except (PageTimeoutError, ScrapingError) as e:
+            last_exception = e
+
+            if attempt < max_retries:
+                delay = retry_delay * (backoff**attempt)
+                logger.warning(
+                    f"    -> Attempt {attempt + 1} failed, retrying in {delay:.1f}s: {e}"
+                )
+                await asyncio.sleep(delay)
+            else:
+                error_context = {
+                    "url": url,
+                    "attempts": attempt + 1,
+                    "error_type": type(e).__name__,
+                }
+                logger.error(
+                    f"Scraping failed after {attempt + 1} attempts: {e} | Context: {error_context}"
+                )
+
+    # Re-raise the last exception
+    if last_exception:
+        raise last_exception
+    raise ScrapingError(f"Failed to scrape {url} after {max_retries + 1} attempts")
 
 
 async def rate_limited_fetch(url: str) -> str:
