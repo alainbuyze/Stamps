@@ -92,7 +92,19 @@ def enhance_markdown_for_print(md_content: str) -> str:
     step_counter = 0
 
     heading_pattern = r"^(#{2,3})\s+(.+)$"
-    img_pattern = r"(!\[([^\]]*)\]\(([^)]+)\))"
+    img_pattern = r"!\[([^\]]*)\]\(([^)]+)\)"
+
+    def md_img_to_html(line: str) -> str:
+        """Convert markdown image syntax to HTML img tags.
+
+        This is necessary because markdown parsers don't process markdown
+        syntax inside HTML blocks (like divs).
+        """
+        return re.sub(
+            img_pattern,
+            r'<img alt="\1" src="\2">',
+            line
+        )
 
     for line in md_content.split("\n"):
         # Check for heading
@@ -113,7 +125,7 @@ def enhance_markdown_for_print(md_content: str) -> str:
                 in_construction = True
             elif any(
                 keyword in heading_text
-                for keyword in ["connection", "wiring", "aansluiting", "bedrading"]
+                for keyword in ["connection", "wiring", "aansluit", "bedrading", "schema"]
             ):
                 section_type = "connection"
                 in_construction = False
@@ -130,25 +142,29 @@ def enhance_markdown_for_print(md_content: str) -> str:
         # Check for image
         img_match = re.search(img_pattern, line)
         if img_match:
+            # Convert markdown images to HTML (required inside HTML blocks)
+            html_line = md_img_to_html(line)
+
             # Wrap images with appropriate div classes
             if section_type == "construction":
                 step_counter += 1
                 # Wrap in construction-step div
                 lines.append(f'<div class="construction-step" data-step="{step_counter}">')
-                lines.append(line)
+                lines.append(html_line)
                 lines.append("</div>")
             elif section_type == "connection":
                 # Full-page connection diagrams
                 lines.append('<div class="connection-diagram">')
-                lines.append(line)
+                lines.append(html_line)
                 lines.append("</div>")
             elif section_type == "code":
                 # Code screenshots
                 lines.append('<div class="code-image">')
-                lines.append(line)
+                lines.append(html_line)
                 lines.append("</div>")
             else:
-                lines.append(line)
+                # Other images - convert to HTML but don't wrap
+                lines.append(html_line)
         else:
             lines.append(line)
 
@@ -228,13 +244,13 @@ body {
     color: #333333;
 }
 
-/* Title page */
+/* Title */
 h1 {
     font-size: 28pt;
     font-weight: bold;
     text-align: center;
-    page-break-after: always;
-    margin-top: 50mm;
+    margin-top: 10mm;
+    margin-bottom: 8mm;
     color: #2c3e50;
 }
 
@@ -242,9 +258,8 @@ h1 {
 h2 {
     font-size: 18pt;
     font-weight: bold;
-    page-break-before: always;
     page-break-after: avoid;
-    margin-top: 0;
+    margin-top: 5mm;
     margin-bottom: 8mm;
     color: #2c3e50;
     border-bottom: 2pt solid #3498db;
@@ -306,6 +321,13 @@ img {
     height: auto;
     display: block;
     margin: 3mm auto;
+}
+
+/* QR codes - inline display, square aspect ratio */
+img.qrcode {
+    display: inline;
+    margin: 0 2mm;
+    vertical-align: middle;
 }
 
 /* Construction diagrams */
@@ -398,30 +420,54 @@ h1, h2, h3, h4, h5, h6 {
 """
 
 
-def link_callback(uri: str, rel: str) -> str:
-    """Callback for xhtml2pdf to resolve resource URIs.
+def create_link_callback(base_path: Path):
+    """Create a link callback with a specific base path for resolving relative URIs.
 
     Args:
-        uri: The URI to resolve (image path, etc.)
-        rel: Relative path (unused)
+        base_path: Base directory for resolving relative paths.
 
     Returns:
-        Resolved path to the resource.
+        Callback function for xhtml2pdf.
     """
-    # Handle file:// URIs
-    if uri.startswith("file://"):
-        # Convert file:// URI to local path
-        if uri.startswith("file:///"):
-            # Windows absolute path: file:///C:/path
-            return uri[8:]  # Remove 'file:///'
-        return uri[7:]  # Remove 'file://'
+    def link_callback(uri: str, rel: str) -> str:
+        """Callback for xhtml2pdf to resolve resource URIs.
 
-    # Handle absolute paths
-    if Path(uri).is_absolute():
+        Args:
+            uri: The URI to resolve (image path, etc.)
+            rel: Relative path (unused)
+
+        Returns:
+            Resolved path to the resource.
+        """
+        # Handle file:// URIs
+        if uri.startswith("file://"):
+            # Convert file:// URI to local path
+            if uri.startswith("file:///"):
+                # Windows absolute path: file:///C:/path
+                return uri[8:]  # Remove 'file:///'
+            return uri[7:]  # Remove 'file://'
+
+        # Handle absolute paths
+        if Path(uri).is_absolute():
+            return uri
+
+        # Resolve relative paths against base_path
+        # Convert backslashes to forward slashes for consistency
+        uri_normalized = uri.replace("\\", "/")
+        resolved = base_path / uri_normalized
+        if resolved.exists():
+            return str(resolved)
+
+        # Try with original path
+        resolved_original = base_path / uri
+        if resolved_original.exists():
+            return str(resolved_original)
+
+        # Return as-is if not found (xhtml2pdf will show warning)
+        logger.debug(f"Could not resolve URI: {uri} (base: {base_path})")
         return uri
 
-    # Return as-is for relative paths (xhtml2pdf will resolve)
-    return uri
+    return link_callback
 
 
 def markdown_to_pdf(
@@ -455,6 +501,23 @@ def markdown_to_pdf(
         # Convert markdown to HTML
         html_content = markdown_to_html(md_content, css_path)
         logger.debug(f"    -> Generated {len(html_content)} bytes of HTML")
+
+        # Determine base path for resolving relative URLs
+        if base_url:
+            # Convert file:// URI to path
+            if base_url.startswith("file:///"):
+                base_path = Path(base_url[8:])
+            elif base_url.startswith("file://"):
+                base_path = Path(base_url[7:])
+            else:
+                base_path = Path(base_url)
+        else:
+            base_path = output_path.parent
+
+        logger.debug(f"    -> Base path for images: {base_path}")
+
+        # Create link callback with base path
+        link_callback = create_link_callback(base_path)
 
         # Generate PDF using xhtml2pdf
         with open(output_path, "wb") as pdf_file:

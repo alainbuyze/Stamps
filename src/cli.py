@@ -25,7 +25,6 @@ from src.translator import translate_content
 
 console = Console()
 
-
 def slugify(text: str) -> str:
     """Convert text to a URL-friendly slug.
 
@@ -45,7 +44,6 @@ def slugify(text: str) -> str:
     # Remove leading/trailing hyphens
     slug = slug.strip("-")
     return slug
-
 
 def get_output_filename(url: str, title: str) -> str:
     """Generate output filename from URL or title.
@@ -68,10 +66,9 @@ def get_output_filename(url: str, title: str) -> str:
     # Fall back to title
     return slugify(title)[:60]
 
-
 async def _generate(
     url: str, output: str, verbose: bool, no_enhance: bool, no_translate: bool, no_qrcode: bool, no_makecode: bool
-) -> None:
+    ) -> None:
     """Generate a guide from a single tutorial URL.
 
     Executes the full pipeline: fetch → extract → download images → enhance → translate → generate → QR codes.
@@ -241,13 +238,11 @@ async def _generate(
         )
     )
 
-
 @click.group()
 @click.version_option(version="0.1.0", prog_name="coderdojo")
 def cli() -> None:
     """CoderDojo Guide Generator - Create printable guides from online tutorials."""
     pass
-
 
 @cli.command()
 @click.option("--url", required=True, help="Tutorial page URL")
@@ -273,7 +268,6 @@ def generate(url: str, output: str, verbose: bool, no_enhance: bool, no_translat
     """
     asyncio.run(_generate(url, output, verbose, no_enhance, no_translate, no_qrcode, no_makecode))
 
-
 @cli.command()
 def sources() -> None:
     """List supported source websites."""
@@ -287,30 +281,12 @@ def sources() -> None:
         )
     )
 
-
 @cli.command()
-@click.option(
-    "--input",
-    "-i",
-    required=True,
-    type=click.Path(exists=True, path_type=Path),
-    help="Markdown file to convert to PDF",
-)
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(path_type=Path),
-    help="Output PDF path (defaults to same name with .pdf extension)",
-)
-@click.option(
-    "--css",
-    type=click.Path(exists=True, path_type=Path),
-    help="Custom CSS file for styling (optional)",
-)
+@click.option("--input", "-i", required=True, type=click.Path(exists=True, path_type=Path), help="Markdown file to convert to PDF")
+@click.option("--output","-o",type=click.Path(path_type=Path),help="Output PDF path (defaults to same name with .pdf extension)",)
+@click.option("--css",type=click.Path(exists=True, path_type=Path),help="Custom CSS file for styling (optional)",)
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
-def print_guide(
-    input: Path, output: Path | None, css: Path | None, verbose: bool
-) -> None:
+def print_guide(input: Path, output: Path | None, css: Path | None, verbose: bool) -> None:
     """Convert a markdown guide to printable PDF.
 
     Generates a PDF with A4 portrait layout optimized for printing.
@@ -364,7 +340,6 @@ def print_guide(
             border_style="green",
         )
     )
-
 
 if __name__ == "__main__":
     cli()

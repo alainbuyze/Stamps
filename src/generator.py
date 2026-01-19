@@ -139,7 +139,9 @@ def build_image_map(content: ExtractedContent) -> dict[str, str]:
         # Prefer enhanced path, fall back to local path
         local_path = image.get("enhanced_path") or image.get("local_path")
         if local_path:
-            image_map[src] = local_path
+            # Use forward slashes for markdown compatibility
+            # Backslashes cause escape sequence issues in markdown
+            image_map[src] = local_path.replace("\\", "/")
 
     return image_map
 

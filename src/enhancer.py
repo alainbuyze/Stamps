@@ -11,11 +11,13 @@ from pathlib import Path
 try:
     from src.core.config import get_settings
     from src.sources.base import ExtractedContent
+    from src.image_trimmer import trim_image
 except ImportError:
     # Running as standalone script
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from src.core.config import get_settings
     from src.sources.base import ExtractedContent
+    from src.image_trimmer import trim_image
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -233,6 +235,20 @@ def enhance_all_images(content: ExtractedContent, output_dir: Path) -> Extracted
         success = enhance_image(input_path, enhanced_path)
 
         if success:
+            # Trim the enhanced image to remove whitespace
+            try:
+                trim_image(enhanced_path)
+                logger.debug(f"    -> Trimmed: {enhanced_path.name}")
+            except Exception as e:
+                logger.warning(f"    -> Failed to trim {enhanced_path.name}: {e}")
+
+            # Remove the original image
+            try:
+                input_path.unlink()
+                logger.debug(f"    -> Removed original: {input_path.name}")
+            except Exception as e:
+                logger.warning(f"    -> Failed to remove original {input_path.name}: {e}")
+
             # Store relative path for markdown
             relative_enhanced = Path(local_path).parent / enhanced_filename
             image["enhanced_path"] = str(relative_enhanced)

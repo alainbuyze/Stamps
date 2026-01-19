@@ -80,16 +80,18 @@ def trim_image(
         raise
 
 
-def _trim_whitespace(img: Image.Image) -> Image.Image:
-    """Trim whitespace from an image.
+def _trim_whitespace(img: Image.Image, padding: int = 5) -> Image.Image:
+    """Trim whitespace from an image, preserving a small border.
 
-    Uses PIL's ImageChops to detect non-white pixels and crop to content.
+    Uses PIL's ImageChops to detect non-white pixels and crop to content,
+    while preserving a whitespace border around the content.
 
     Args:
         img: PIL Image to trim.
+        padding: Whitespace padding to preserve around content in pixels (default: 5).
 
     Returns:
-        Trimmed PIL Image.
+        Trimmed PIL Image with padding preserved.
     """
     # Convert to RGB to ensure consistent comparison
     if img.mode == "RGBA":
@@ -114,8 +116,14 @@ def _trim_whitespace(img: Image.Image) -> Image.Image:
     bbox = diff.getbbox()
 
     if bbox:
-        # Crop to bounding box
-        return img.crop(bbox)
+        # Expand bounding box by padding, respecting image boundaries
+        left = max(0, bbox[0] - padding)
+        upper = max(0, bbox[1] - padding)
+        right = min(img.width, bbox[2] + padding)
+        lower = min(img.height, bbox[3] + padding)
+
+        # Crop to expanded bounding box
+        return img.crop((left, upper, right, lower))
     else:
         # Image is entirely white, return as-is
         logger.debug("Image is entirely white, no trimming needed")
@@ -192,8 +200,8 @@ if __name__ == "__main__":
     import sys
 
     parser = argparse.ArgumentParser(description="Trim whitespace from images")
-    parser.add_argument("input", nargs="?", default=r"D:\Coderdojo\test_output\test_makecode.png", help="Input image path")
-    parser.add_argument("output", default=r"D:\Coderdojo\test_output\test_makecode.png",nargs="?", help="Output image path (optional)")
+    parser.add_argument("input", nargs="?", default=r"D:\Coderdojo\docs\nezha-inventor-s-kit-for-microbit-case-01\images\image_034.png", help="Input image path")
+    parser.add_argument("output", default=None,nargs="?", help="Output image path (optional)")
     parser.add_argument("-b", "--border", type=int, default=1, help="Border width in pixels")
     parser.add_argument(
         "-c", "--color", default="black", help="Border color (default: black)"
