@@ -22,7 +22,7 @@ Basic Usage:
     uv run python -m src.cli generate --url "https://wiki.elecfreaks.com/en/microbit/..."
 
     # Process all tutorials from an index page
-    uv run python -m src.cli batch --index "https://wiki.elecfreaks.com/en/microbit/..."
+    uv run python -m src.cli batch --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/"
 
     # Convert a markdown guide to PDF
     uv run python -m src.cli print --input output/tutorial.md
