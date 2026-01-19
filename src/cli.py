@@ -1,4 +1,144 @@
-"""Command-line interface for the CoderDojo Guide Generator."""
+"""CoderDojo Guide Generator CLI - Create printable guides from online tutorials.
+
+This module provides a comprehensive command-line interface for converting online tutorials
+into printable guides with enhanced images, translations, and QR codes. The tool supports
+both single tutorial processing and batch processing of multiple tutorials.
+
+Features:
+- Download and extract content from supported tutorial websites
+- Replace MakeCode screenshots with localized versions
+- Download and enhance images using AI upscaling
+- Translate content to Dutch
+- Generate QR codes for hyperlinks
+- Create printable PDF versions with optimized layouts
+- Batch processing with resume capability
+- Progress tracking and detailed logging
+
+Supported Sources:
+- wiki.elecfreaks.com - Elecfreaks Wiki tutorials
+
+Basic Usage:
+    # Generate a guide from a single tutorial
+    uv run python -m src.cli generate --url "https://wiki.elecfreaks.com/en/microbit/..."
+
+    # Process all tutorials from an index page
+    uv run python -m src.cli batch --index "https://wiki.elecfreaks.com/en/microbit/..."
+
+    # Convert a markdown guide to PDF
+    uv run python -m src.cli print --input output/tutorial.md
+
+Examples:
+    # Basic single tutorial processing
+    uv run python -m src.cli generate `
+        --url "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/case-01/" `
+        --output ./guides
+
+    # Single tutorial with all features enabled (default behavior)
+    uv run python -m src.cli generate `
+        --url "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/case-02/" `
+        --output ./guides `
+        --verbose
+
+    # Single tutorial skipping optional features
+    uv run python -m src.cli generate `
+        --url "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/case-03/" `
+        --output ./guides `
+        --no-enhance `
+        --no-translate `
+        --no-qrcode `
+        --no-makecode
+
+    # List all tutorials on an index page
+    uv run python -m src.cli batch `
+        --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" `
+        --list-only
+
+    # Batch process all tutorials with resume capability
+    uv run python -m src.cli batch `
+        --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" `
+        --output ./guides `
+        --verbose
+
+    # Resume interrupted batch processing
+    uv run python -m src.cli batch `
+        --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" `
+        --output ./guides `
+        --resume `
+        --verbose
+
+    # Batch processing with disabled features for faster processing
+    uv run python -m src.cli batch `
+        --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" `
+        --output ./guides `
+        --no-enhance `
+        --no-translate `
+        --no-qrcode
+
+    # Convert markdown guide to PDF with default settings
+    uv run python -m src.cli print `
+        --input ./guides/case-01.md
+
+    # Convert to PDF with custom output path
+    uv run python -m src.cli print `
+        --input ./guides/case-01.md `
+        --output ./printable/case-01-tutorial.pdf
+
+    # Convert to PDF with custom CSS styling
+    uv run python -m src.cli print `
+        --input ./guides/case-01.md `
+        --css ./custom-print-styles.css
+
+    # Show supported sources
+    uv run python -m src.cli sources
+
+Output Structure:
+    Single tutorial:
+    <output>/
+        <guide-name>.md              # Generated markdown guide
+        <guide-name>/
+            images/                  # Downloaded and enhanced images
+            qrcodes/                 # QR codes for hyperlinks (if enabled)
+
+    Batch processing:
+    <output>/
+        guide-1.md
+        guide-1/images/
+        guide-2.md
+        guide-2/images/
+        ...
+        .batch_state.json           # Resume state (auto-cleaned on success)
+
+Pipeline Stages:
+    1. Fetch: Download HTML content from the tutorial URL
+    2. Extract: Parse and extract structured content (title, sections, images)
+    3. MakeCode: Replace MakeCode screenshots with Dutch versions (if enabled)
+    4. Download: Fetch all images and store locally
+    5. Enhance: AI-enhance images for better quality (if enabled)
+    6. Translate: Convert content to Dutch (if enabled)
+    7. Generate: Create markdown guide with local image references
+    8. QR Codes: Generate QR codes for hyperlinks (if enabled)
+    9. Save: Write guide to filesystem
+
+Error Handling:
+- Critical errors (fetch, extract, generate, save) will stop processing
+- Non-critical errors (download, enhance, translate, makecode) log warnings and continue
+- Batch processing tracks failed tutorials and can resume from interruptions
+- Verbose mode provides detailed error information and debugging output
+
+Configuration:
+The tool uses environment variables and configuration files for settings:
+- RATE_LIMIT_SECONDS: Delay between batch processing requests
+- MAKECODE_REPLACE_ENABLED: Enable/disable MakeCode screenshot replacement
+- MAKECODE_LANGUAGE: Target language for MakeCode replacements
+- LOG_LEVEL: Default logging level (DEBUG, INFO, WARNING, ERROR)
+
+Dependencies:
+- playwright: Web scraping and browser automation
+- upscayl: AI image enhancement (optional)
+- weasyprint: PDF generation (for print command)
+- click: Command-line interface framework
+- rich: Terminal formatting and progress display
+"""
 
 import asyncio
 import json
@@ -475,7 +615,7 @@ async def _batch(
         table = Table(title=f"Tutorials Found ({len(tutorials)})")
         table.add_column("#", style="dim", width=4)
         table.add_column("Title", style="cyan")
-        table.add_column("URL", style="dim")
+        table.add_column("URL", style="dim", width=80, no_wrap=True)
 
         for i, tutorial in enumerate(tutorials, 1):
             # Encode title for safe console output
