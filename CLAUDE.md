@@ -28,6 +28,7 @@ src/
 ├── enhancer.py             # Upscayl image processing
 ├── translator.py           # Dutch translation
 ├── generator.py            # Markdown generation
+├── catalog.py              # Catalog generation from guides
 └── sources/
     ├── base.py             # Base source adapter
     └── elecfreaks.py       # Elecfreaks-specific extraction rules
@@ -73,6 +74,12 @@ uv run python -m src.cli batch --index "<URL>" --output ./output
 
 # List tutorials without processing
 uv run python -m src.cli batch --index "<URL>" --list-only
+
+# Generate catalog from existing guides
+uv run python -m src.cli catalog --input ./output
+
+# Generate catalog with custom title
+uv run python -m src.cli catalog --input ./output --title "Nezha Kit Projects"
 ```
 
 **Windows (Command Prompt):**
@@ -88,6 +95,12 @@ uv run python -m src.cli batch --index "<URL>" --output ./output
 
 # List tutorials without processing
 uv run python -m src.cli batch --index "<URL>" --list-only
+
+# Generate catalog from existing guides
+uv run python -m src.cli catalog --input ./output
+
+# Generate catalog with custom title
+uv run python -m src.cli catalog --input ./output --title "Nezha Kit Projects"
 ```
 
 **Linux/macOS:**
@@ -103,6 +116,12 @@ uv run python -m src.cli batch --index "<URL>" --output ./output
 
 # List tutorials without processing
 uv run python -m src.cli batch --index "<URL>" --list-only
+
+# Generate catalog from existing guides
+uv run python -m src.cli catalog --input ./output
+
+# Generate catalog with custom title
+uv run python -m src.cli catalog --input ./output --title "Nezha Kit Projects"
 ```
 
 **Test:**

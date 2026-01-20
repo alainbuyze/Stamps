@@ -162,6 +162,21 @@ def translate_text_preserving_code(text: str, source: str = "en", target: str = 
         # Translate the text part
         translated = translate_text(text_without_code, source, target)
 
+        # Apply hardcoded word pair fixes for bad translations
+        if target == "nl":
+            word_fixes = {
+                # English to Dutch fixes
+                "Case": "Project",
+                "Geval": "project",
+                "Casus": "project",
+                "Kast": "project"
+                }
+
+            # Apply word fixes
+            for english_word, dutch_word in word_fixes.items():
+                # Case-sensitive replacement for programming terms
+                translated = translated.replace(english_word, dutch_word)
+
         # Restore code blocks
         result = _restore_code_blocks(translated, code_blocks)
         return result

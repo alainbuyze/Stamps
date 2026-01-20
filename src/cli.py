@@ -35,7 +35,7 @@ Examples:
 
     # Single tutorial with all features enabled (default behavior)
     uv run python -m src.cli generate `
-        --url "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/case-02/" `
+        --url "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/Nezha_Inventor_s_kit_for_microbit_case_69" `
         --output ./guides `
         --verbose
 
@@ -161,6 +161,7 @@ from src.generator import generate_guide, save_guide
 from src.makecode_replacer import replace_makecode_screenshots
 from src.scraper import fetch_page, get_browser
 from src.translator import translate_content
+from src.catalog import generate_catalog
 
 # Note: printer module imported lazily in print_guide() and print_all() to avoid WeasyPrint GTK3 dependency
 # when running commands that don't need PDF generation
@@ -997,6 +998,83 @@ def print_all(input: Path, output: Path | None, css: Path | None, verbose: bool)
             border_style="green" if error_count == 0 else "yellow",
         )
     )
+
+@cli.command()
+@click.option(
+    "--input", "-i",
+    required=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Directory containing markdown guide files"
+)
+@click.option(
+    "--output", "-o",
+    type=click.Path(path_type=Path),
+    help="Output path for catalog file (defaults to <input>/catalog.md)"
+)
+@click.option(
+    "--title", "-t",
+    default="Project Catalogus",
+    help="Title for the catalog document"
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")
+def catalog(input: Path, output: Path | None, title: str, verbose: bool) -> None:
+    """Generate a catalog document from all project guides.
+
+    Creates a markdown document containing a table of contents and summary
+    entries for each project guide found in the input directory. Each entry
+    includes the project title, introduction, main image, and a link to the
+    full guide.
+
+    The catalog is designed for printing, with page breaks between projects.
+
+    Example usage:
+        uv run python -m src.cli catalog --input ./output
+        uv run python -m src.cli catalog -i ./output -o ./output/my-catalog.md
+        uv run python -m src.cli catalog -i ./output --title "Nezha Kit Projects"
+
+    Output structure:
+        The catalog includes:
+        - Table of contents with links to each project
+        - Project entries with title, image, introduction, and guide link
+        - Page breaks between projects for PDF printing
+    """
+    # Update logging level if verbose flag is used
+    if verbose:
+        setup_logging("DEBUG")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("Generating catalog...", total=None)
+
+        try:
+            catalog_path = generate_catalog(input, output, title)
+            progress.update(task, description="Catalog generated")
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise SystemExit(1)
+        except Exception as e:
+            console.print(f"[red]Error generating catalog:[/red] {e}")
+            raise SystemExit(1)
+
+    # Count guides included
+    md_count = len([f for f in input.glob("*.md") if f.name != "catalog.md"])
+
+    # Success message
+    console.print(
+        Panel(
+            f"[green]Catalog generated successfully![/green]\n\n"
+            f"[bold]Title:[/bold] {title}\n"
+            f"[bold]Guides included:[/bold] {md_count}\n"
+            f"[bold]Output:[/bold] {catalog_path}",
+            title="Success",
+            border_style="green",
+        )
+    )
+
 
 if __name__ == "__main__":
     cli()
