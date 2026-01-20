@@ -1,4 +1,9 @@
-"""Dutch translation module using deep-translator."""
+"""Dutch translation module using deep-translator.
+
+Supports multiple translation providers:
+- Google Translate (free, rate-limited)
+- DeepL (requires API key, higher quality)
+"""
 
 import inspect
 import logging
@@ -6,7 +11,7 @@ import re
 import time
 from copy import deepcopy
 
-from deep_translator import GoogleTranslator
+from deep_translator import DeeplTranslator, GoogleTranslator
 
 from src.core.config import get_settings
 from src.core.errors import TranslationError
@@ -18,12 +23,52 @@ logger = logging.getLogger(__name__)
 # Delay between translation calls to avoid rate limiting
 TRANSLATION_DELAY_SECONDS = 0.5
 
-# Maximum text length for single translation (Google limit)
+# Maximum text length for single translation
 MAX_TRANSLATION_LENGTH = 4500
+
+
+def _get_translator(source: str, target: str):
+    """Get the configured translator instance.
+
+    Args:
+        source: Source language code.
+        target: Target language code.
+
+    Returns:
+        Translator instance (GoogleTranslator or DeeplTranslator).
+
+    Raises:
+        TranslationError: If DeepL is configured but no API key is provided.
+    """
+    provider = settings.TRANSLATION_PROVIDER.lower()
+
+    if provider == "deepl":
+        if not settings.DEEPL_API_KEY:
+            raise TranslationError(
+                "DeepL translation requires DEEPL_API_KEY to be set. "
+                "Get a free API key at https://www.deepl.com/pro-api"
+            )
+        # deep-translator library expects lowercase language codes
+        deepl_target = target.lower()
+        deepl_source = source.lower()
+        # Handle English special case (DeepL requires en-US or en-GB variant)
+        if deepl_target == "en":
+            deepl_target = "en-US"
+        return DeeplTranslator(
+            api_key=settings.DEEPL_API_KEY,
+            source=deepl_source,
+            target=deepl_target,
+            use_free_api=True,  # Use free API tier by default
+        )
+    else:
+        # Default to Google Translate
+        return GoogleTranslator(source=source, target=target)
 
 
 def translate_text(text: str, source: str = "en", target: str = "nl") -> str:
     """Translate text from source to target language.
+
+    Uses the configured translation provider (Google or DeepL).
 
     Args:
         text: Text to translate.
@@ -42,9 +87,11 @@ def translate_text(text: str, source: str = "en", target: str = "nl") -> str:
     logger.debug(f" * {inspect.currentframe().f_code.co_name} > Translating: {text[:100]}{'...' if len(text) > 100 else ''}")
 
     try:
-        translator = GoogleTranslator(source=source, target=target)
+        translator = _get_translator(source, target)
         translated = translator.translate(text)
         return translated or text
+    except TranslationError:
+        raise
     except Exception as e:
         logger.warning(f"Translation failed for text: {text[:50]}... Error: {e}")
         raise TranslationError(f"Failed to translate: {e}") from e

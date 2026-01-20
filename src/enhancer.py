@@ -5,8 +5,12 @@ import logging
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
 # Handle imports for both module and standalone execution
 try:
@@ -22,6 +26,7 @@ except ImportError:
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+console = Console()
 
 # Minimum file size to enhance (skip tiny images)
 MIN_FILE_SIZE_BYTES = 10 * 1024  # 10KB
@@ -115,6 +120,10 @@ def enhance_image(input_path: Path, output_path: Path) -> bool:
         str(settings.UPSCAYL_SCALE),
         "-n",
         settings.UPSCAYL_MODEL,
+        "-g",
+        settings.UPSCAYL_GPU_ID,
+        "-j",
+        settings.UPSCAYL_THREADS,
     ]
 
     try:
@@ -123,7 +132,7 @@ def enhance_image(input_path: Path, output_path: Path) -> bool:
             cmd,
             cwd=str(resources_dir),  # Set working directory to resources directory
             capture_output=True,
-            timeout=120,  # 2 minute timeout per image
+            timeout=settings.ENHANCE_TIMEOUT,
         )
 
         # Decode stderr carefully for error messages
@@ -226,7 +235,12 @@ def _process_single_image(
         return image, None, False
 
 
-def enhance_all_images(content: ExtractedContent, output_dir: Path) -> ExtractedContent:
+def enhance_all_images(
+    content: ExtractedContent,
+    output_dir: Path,
+    progress_callback: Callable[[int, int], None] | None = None,
+    show_progress: bool = False,
+) -> ExtractedContent:
     """Enhance all downloaded images in content using parallel processing.
 
     Processes images that have local_path set by the downloader.
@@ -235,6 +249,8 @@ def enhance_all_images(content: ExtractedContent, output_dir: Path) -> Extracted
     Args:
         content: Extracted content with downloaded images.
         output_dir: Base output directory.
+        progress_callback: Optional callback(completed, total) for progress updates.
+        show_progress: Show rich progress bar (used when running standalone).
 
     Returns:
         Updated ExtractedContent with enhanced_path set for enhanced images.
@@ -271,25 +287,55 @@ def enhance_all_images(content: ExtractedContent, output_dir: Path) -> Extracted
     enhanced_count = 0
     # Use parent directory since local_path includes guide subfolder name
     base_dir = output_dir.parent
+    total_count = len(images_to_enhance)
 
-    # Process images in parallel
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        # Submit all enhancement tasks
-        future_to_image = {
-            executor.submit(_process_single_image, image, base_dir): image
-            for image in images_to_enhance
-        }
+    def _process_with_progress(progress: Progress | None, task_id: int | None) -> int:
+        """Process all images and return enhanced count."""
+        nonlocal enhanced_count
+        processed_count = 0
 
-        # Collect results as they complete
-        for future in as_completed(future_to_image):
-            try:
-                image, enhanced_path, success = future.result()
-                if success and enhanced_path:
-                    image["enhanced_path"] = enhanced_path
-                    enhanced_count += 1
-            except Exception as e:
-                original_image = future_to_image[future]
-                logger.error(f"    -> Enhancement failed for {original_image.get('local_path')}: {e}")
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all enhancement tasks
+            future_to_image = {
+                executor.submit(_process_single_image, image, base_dir): image
+                for image in images_to_enhance
+            }
+
+            # Collect results as they complete
+            for future in as_completed(future_to_image):
+                try:
+                    image, enhanced_path, success = future.result()
+                    if success and enhanced_path:
+                        image["enhanced_path"] = enhanced_path
+                        enhanced_count += 1
+                except Exception as e:
+                    original_image = future_to_image[future]
+                    logger.error(f"    -> Enhancement failed for {original_image.get('local_path')}: {e}")
+
+                processed_count += 1
+
+                # Update progress
+                if progress and task_id is not None:
+                    progress.update(task_id, completed=processed_count)
+                if progress_callback:
+                    progress_callback(processed_count, total_count)
+
+        return enhanced_count
+
+    # Show rich progress bar if requested
+    if show_progress:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task_id = progress.add_task("Enhancing images...", total=total_count)
+            enhanced_count = _process_with_progress(progress, task_id)
+            progress.update(task_id, description=f"Enhanced {enhanced_count}/{total_count} images")
+    else:
+        _process_with_progress(None, None)
 
     logger.debug(f"    -> Enhanced {enhanced_count}/{len(images_to_enhance)} images")
     return content
@@ -300,6 +346,8 @@ if __name__ == "__main__":
     import argparse
     import sys
     from pathlib import Path
+
+    from rich.panel import Panel
 
     parser = argparse.ArgumentParser(description="Test image enhancement with Upscayl")
     parser.add_argument("input", help="Input image path")
@@ -317,18 +365,42 @@ if __name__ == "__main__":
     # Validate input file
     input_path = Path(args.input)
     if not input_path.exists():
-        print(f"Error: Input file not found: {input_path}")
+        console.print(f"[red]Error:[/red] Input file not found: {input_path}")
         sys.exit(1)
 
-    # Enhance the image
+    # Enhance the image with progress
     output_path = Path(args.output)
-    print(f"Enhancing {input_path} -> {output_path}")
 
-    success = enhance_image(input_path, output_path)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task(f"Enhancing {input_path.name}...", total=None)
+        success = enhance_image(input_path, output_path)
+        if success:
+            progress.update(task, description="Enhancement complete")
 
     if success:
-        print(f"✓ Enhancement successful: {output_path}")
-        print(f"  File size: {output_path.stat().st_size} bytes")
+        console.print(
+            Panel(
+                f"[green]Enhancement successful![/green]\n\n"
+                f"[bold]Input:[/bold] {input_path}\n"
+                f"[bold]Output:[/bold] {output_path}\n"
+                f"[bold]File size:[/bold] {output_path.stat().st_size:,} bytes",
+                title="Success",
+                border_style="green",
+            )
+        )
     else:
-        print("✗ Enhancement failed")
+        console.print(
+            Panel(
+                f"[red]Enhancement failed[/red]\n\n"
+                f"[bold]Input:[/bold] {input_path}\n"
+                f"[bold]Output:[/bold] {output_path}",
+                title="Error",
+                border_style="red",
+            )
+        )
         sys.exit(1)

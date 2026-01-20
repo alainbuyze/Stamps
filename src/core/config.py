@@ -38,7 +38,10 @@ class Settings(BaseSettings):
     )
 
     # Image settings
-    IMAGE_DOWNLOAD_TIMEOUT: int = Field(default=30, description="Image download timeout in seconds")
+    IMAGE_DOWNLOAD_TIMEOUT: int = Field(default=60, description="Image download timeout in seconds")
+    IMAGE_DOWNLOAD_MAX_RETRIES: int = Field(default=3, description="Maximum retry attempts for failed image downloads")
+    IMAGE_DOWNLOAD_RETRY_DELAY: float = Field(default=2.0, description="Initial delay between retries in seconds")
+    IMAGE_DOWNLOAD_RETRY_BACKOFF: float = Field(default=2.0, description="Backoff multiplier for retry delays")
     IMAGE_OUTPUT_DIR: str = Field(default="images", description="Subdirectory for images")
     IMAGE_SCALE: float = Field(default=1.0, description="Scale factor for images (1.0 = original size)")
 
@@ -49,16 +52,21 @@ class Settings(BaseSettings):
     )
     UPSCAYL_SCALE: int = Field(default=4, description="Upscale factor (2 or 4)")
     UPSCAYL_MODEL: str = Field(default="realesrgan-x4plus", description="Upscayl model name")
+    UPSCAYL_GPU_ID: str = Field(default="auto", description="GPU device(s) to use (auto, 0, 0,1 for multi-GPU)")
+    UPSCAYL_THREADS: str = Field(default="1:2:2", description="Thread count for load:proc:save")
     ENHANCE_IMAGES: bool = Field(default=True, description="Enable image enhancement")
     ENHANCE_WORKERS: int = Field(default=2, description="Number of parallel enhancement workers")
+    ENHANCE_TIMEOUT: int = Field(default=180, description="Enhancement timeout per image in seconds")
 
     # QR Code settings
     QRCODE_SCALE: float = Field(default=1.0, description="Scale factor for QR codes (1.0 = original size)")
 
     # Translation settings
     TRANSLATE_ENABLED: bool = Field(default=True, description="Enable Dutch translation")
+    TRANSLATION_PROVIDER: str = Field(default="google", description="Translation provider: 'google' or 'deepl'")
     TRANSLATION_SOURCE: str = Field(default="en", description="Source language")
     TRANSLATION_TARGET: str = Field(default="nl", description="Target language (Dutch)")
+    DEEPL_API_KEY: str = Field(default="", description="DeepL API key (required if using deepl provider)")
 
     # MakeCode settings
     MAKECODE_LANGUAGE: str = Field(default="nl", description="Language for MakeCode screenshots")

@@ -249,6 +249,8 @@ async def _generate(
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
         console=console,
         transient=True,
     ) as progress:
@@ -303,12 +305,21 @@ async def _generate(
             # Continue without images
 
         # Enhance images (optional)
-        if not no_enhance and any(img.get("local_path") for img in content.images):
+        images_to_enhance = [
+            img for img in content.images
+            if img.get("local_path") and not img.get("replaced_with_dutch")
+        ]
+        if not no_enhance and images_to_enhance:
             progress.update(task, description="Enhancing images...")
             try:
-                content = enhance_all_images(content, guide_subdir)
+                content = enhance_all_images(
+                    content, guide_subdir, show_progress=True
+                )
                 enhanced = sum(1 for img in content.images if img.get("enhanced_path"))
-                progress.update(task, description=f"Enhanced {enhanced} images")
+                progress.update(
+                    task,
+                    description=f"Enhanced {enhanced}/{len(images_to_enhance)} images",
+                )
             except Exception as e:
                 console.print(f"[yellow]Warning:[/yellow] Image enhancement failed: {e}")
                 # Continue without enhancement
@@ -507,7 +518,7 @@ async def _generate_single(
         # Enhance images (optional)
         if not no_enhance and any(img.get("local_path") for img in content.images):
             try:
-                content = enhance_all_images(content, guide_subdir)
+                content = enhance_all_images(content, guide_subdir, show_progress=True)
             except Exception:
                 pass  # Continue without enhancement
 

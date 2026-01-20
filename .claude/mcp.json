@@ -9,7 +9,7 @@
     },
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@anthropic/mcp-server-filesystem", "/path/to/allowed/dir"]
+      "args": ["-y", "@anthropic/mcp-server-filesystem", "C:/Users/alain/CascadeProjects"]
     },
     "supabase": {
       "type": "http",

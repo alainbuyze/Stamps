@@ -67,7 +67,7 @@ def generate_filename(url: str, alt: str, index: int) -> str:
 
 
 async def download_image(url: str, output_path: Path, client: httpx.AsyncClient) -> bool:
-    """Download a single image.
+    """Download a single image with retry logic.
 
     Args:
         url: Image URL to download.
@@ -81,29 +81,52 @@ async def download_image(url: str, output_path: Path, client: httpx.AsyncClient)
     url_stem = urlparse(url).path.split('/')[-1].split('.')[0]
     logger.debug(f" * {inspect.currentframe().f_code.co_name} > Downloading: {url_stem}")
 
-    try:
-        async with client.stream("GET", url) as response:
-            if response.status_code >= 400:
-                logger.warning(f"    -> Failed to download: HTTP {response.status_code}")
-                return False
+    max_retries = settings.IMAGE_DOWNLOAD_MAX_RETRIES
+    retry_delay = settings.IMAGE_DOWNLOAD_RETRY_DELAY
+    backoff = settings.IMAGE_DOWNLOAD_RETRY_BACKOFF
 
-            # Ensure directory exists
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            async with client.stream("GET", url) as response:
+                if response.status_code >= 400:
+                    logger.warning(f"    -> Failed to download: HTTP {response.status_code}")
+                    last_error = f"HTTP {response.status_code}"
+                    if attempt < max_retries:
+                        wait_time = retry_delay * (backoff ** attempt)
+                        logger.debug(f"    -> Retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    return False
 
-            # Stream to file
-            with open(output_path, "wb") as f:
-                async for chunk in response.aiter_bytes():
-                    f.write(chunk)
+                # Ensure directory exists
+                output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        #logger.debug(f"    -> Saved to: {output_path}")
-        return True
+                # Stream to file
+                with open(output_path, "wb") as f:
+                    async for chunk in response.aiter_bytes():
+                        f.write(chunk)
 
-    except httpx.TimeoutException as e:
-        logger.warning(f"    -> Download timeout: {e}")
-        return False
-    except Exception as e:
-        logger.error(f"    -> Download failed: {e}")
-        return False
+            return True
+
+        except httpx.TimeoutException as e:
+            last_error = f"Timeout: {e}"
+            logger.warning(f"    -> Download timeout (attempt {attempt + 1}/{max_retries + 1})")
+        except httpx.ConnectError as e:
+            last_error = f"Connection error: {e}"
+            logger.warning(f"    -> Connection error (attempt {attempt + 1}/{max_retries + 1})")
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"    -> Download error (attempt {attempt + 1}/{max_retries + 1}): {e}")
+
+        # Retry with backoff
+        if attempt < max_retries:
+            wait_time = retry_delay * (backoff ** attempt)
+            logger.debug(f"    -> Retrying in {wait_time:.1f}s")
+            await asyncio.sleep(wait_time)
+
+    logger.error(f"    -> Download failed after {max_retries + 1} attempts: {last_error}")
+    return False
 
 
 async def download_images(content: ExtractedContent, output_dir: Path) -> ExtractedContent:
