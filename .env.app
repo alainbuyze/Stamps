@@ -17,7 +17,7 @@ LOG_FORMAT="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 # Image settings
 IMAGE_DOWNLOAD_TIMEOUT=60
 IMAGE_OUTPUT_DIR="images"
-IMAGE_SCALE=1.2
+IMAGE_SCALE=1.1
 
 # Enhancement settings (Upscayl)
 UPSCAYL_PATH="C:\Program Files\Upscayl\resources\bin\upscayl-bin.exe"

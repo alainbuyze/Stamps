@@ -33,9 +33,13 @@ class Settings(BaseSettings):
     # Logging settings
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
     LOG_FORMAT: str = Field(
-        default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        default="%(asctime)s - %(name)s - %(levelname)s - %(message)s [%(funcName)s:%(lineno)d]",
         description="Log message format",
     )
+    LOG_MAX_SIZE_MB: int = Field(default=2, description="Maximum log file size in MB before rotation")
+    LOG_BACKUP_COUNT: int = Field(default=5, description="Number of backup log files to keep")
+    LOG_FILE_NAME: str = Field(default="app.log", description="Main application log filename")
+    LOG_ERROR_FILE_NAME: str = Field(default="errors.log", description="Error log filename")
 
     # Image settings
     IMAGE_DOWNLOAD_TIMEOUT: int = Field(default=60, description="Image download timeout in seconds")

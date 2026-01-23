@@ -338,6 +338,7 @@ def enhance_all_images(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             TaskProgressColumn(),
+            refresh_per_second=1,
             console=console,
         ) as standalone_progress:
             task_id = standalone_progress.add_task("Enhancing images...", total=total_count)

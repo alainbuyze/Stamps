@@ -321,6 +321,7 @@ async def _generate(
         BarColumn(),
         TaskProgressColumn(),
         console=console,
+        refresh_per_second=1,
         transient=True,
     ) as progress:
         # Fetch page
@@ -829,7 +830,8 @@ async def _batch(
 @click.version_option(version="0.1.0", prog_name="coderdojo")
 def cli() -> None:
     """CoderDojo Guide Generator - Create printable guides from online tutorials."""
-    pass
+    # Initialize logging at startup
+    setup_logging()
 
 @cli.command()
 @click.option("--url", required=True, help="Tutorial page URL")
