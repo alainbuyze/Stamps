@@ -12,6 +12,7 @@ Features:
 - Generate QR codes for hyperlinks
 - Create printable PDF versions with optimized layouts
 - Batch processing with resume capability
+- Re-process guides using existing images (skip download/enhance)
 - Progress tracking and detailed logging
 
 Supported Sources:
@@ -48,6 +49,12 @@ Examples:
         --no-qrcode `
         --no-makecode
 
+    # Re-process tutorial using existing downloaded/enhanced images
+    uv run python -m src.cli generate `
+        --url "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/Nezha_Inventor_s_kit_for_microbit_case_01/" `
+        --output "D:/Coderdojo/Projects" `
+        --no-download
+
     # List all tutorials on an index page
     uv run python -m src.cli batch `
         --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" `
@@ -73,6 +80,12 @@ Examples:
         --no-enhance `
         --no-translate `
         --no-qrcode
+
+    # Re-process batch using existing downloaded/enhanced images
+    uv run python -m src.cli batch `
+        --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" `
+        --output ./guides `
+        --no-download
 
     # Convert markdown guide to PDF with default settings
     uv run python -m src.cli print `
@@ -112,8 +125,8 @@ Pipeline Stages:
     1. Fetch: Download HTML content from the tutorial URL
     2. Extract: Parse and extract structured content (title, sections, images)
     3. MakeCode: Replace MakeCode screenshots with Dutch versions (if enabled)
-    4. Download: Fetch all images and store locally
-    5. Enhance: AI-enhance images for better quality (if enabled)
+    4. Download: Fetch all images and store locally (or use existing if --no-download)
+    5. Enhance: AI-enhance images for better quality (if enabled, skipped with --no-download)
     6. Translate: Convert content to Dutch (if enabled)
     7. Generate: Create markdown guide with local image references
     8. QR Codes: Generate QR codes for hyperlinks (if enabled)
@@ -152,16 +165,18 @@ from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
 
+from src.catalog import generate_catalog
 from src.core.config import get_settings
 from src.core.logging import setup_logging
 from src.downloader import download_images
+from src.downloader import generate_filename as downloader_generate_filename
 from src.enhancer import enhance_all_images
 from src.extractor import ContentExtractor
 from src.generator import generate_guide, save_guide
 from src.makecode_replacer import replace_makecode_screenshots
 from src.scraper import fetch_page, get_browser
+from src.sources.base import ExtractedContent
 from src.translator import translate_content
-from src.catalog import generate_catalog
 
 # Note: printer module imported lazily in print_guide() and print_all() to avoid WeasyPrint GTK3 dependency
 # when running commands that don't need PDF generation
@@ -209,8 +224,60 @@ def get_output_filename(url: str, title: str) -> str:
     # Fall back to title
     return slugify(title)[:60]
 
+
+def use_existing_images(content: ExtractedContent, guide_subdir: Path) -> ExtractedContent:
+    """Use existing downloaded/enhanced images instead of downloading.
+
+    Scans the images directory for existing files and populates local_path/enhanced_path
+    on the content images. This allows re-running the pipeline without re-downloading.
+
+    Args:
+        content: Extracted content with images to process.
+        guide_subdir: Guide-specific output directory (e.g., output/guide-name).
+
+    Returns:
+        Updated ExtractedContent with local_path/enhanced_path set for existing images.
+    """
+    settings = get_settings()
+    images_dir = guide_subdir / settings.IMAGE_OUTPUT_DIR
+    guide_name = guide_subdir.name
+
+    if not images_dir.exists():
+        console.print(f"[yellow]Warning:[/yellow] Images directory not found: {images_dir}")
+        return content
+
+    # Build a set of existing files for quick lookup
+    existing_files = {f.name: f for f in images_dir.iterdir() if f.is_file()}
+
+    for idx, image in enumerate(content.images):
+        # Skip images already replaced with Dutch MakeCode screenshots
+        if image.get("replaced_with_dutch"):
+            continue
+
+        url = image.get("src", "")
+        if not url:
+            continue
+
+        alt = image.get("alt", "")
+        filename = downloader_generate_filename(url, alt, idx)
+        stem = Path(filename).stem
+        suffix = Path(filename).suffix
+
+        # Check for enhanced version first
+        enhanced_filename = f"{stem}_enhanced{suffix}"
+        if enhanced_filename in existing_files:
+            # Set enhanced_path (relative path for markdown)
+            image["enhanced_path"] = str(Path(guide_name) / settings.IMAGE_OUTPUT_DIR / enhanced_filename)
+            image["local_path"] = image["enhanced_path"]  # Also set local_path for compatibility
+        elif filename in existing_files:
+            # Fall back to original
+            image["local_path"] = str(Path(guide_name) / settings.IMAGE_OUTPUT_DIR / filename)
+
+    return content
+
+
 async def _generate(
-    url: str, output: str, verbose: bool, no_enhance: bool, no_translate: bool, no_qrcode: bool, no_makecode: bool
+    url: str, output: str, verbose: bool, no_enhance: bool, no_translate: bool, no_qrcode: bool, no_makecode: bool, no_download: bool
     ) -> None:
     """Generate a guide from a single tutorial URL.
 
@@ -226,6 +293,7 @@ async def _generate(
         no_translate: Skip Dutch translation stage.
         no_qrcode: Skip QR code generation for hyperlinks.
         no_makecode: Skip MakeCode screenshot replacement.
+        no_download: Skip downloading and enhancing images (use existing files).
 
     Raises:
         SystemExit: On critical failures (unsupported URL, fetch error, extraction error,
@@ -293,37 +361,45 @@ async def _generate(
                 console.print(f"[yellow]Warning:[/yellow] MakeCode replacement failed: {e}")
                 # Continue with original images
 
-        # Download images
-        progress.update(task, description="Downloading images...")
-        try:
-            content = await download_images(content, guide_subdir)
-            downloaded = sum(1 for img in content.images if img.get("local_path"))
-            progress.update(
-                task, description=f"Downloaded {downloaded}/{len(content.images)} images"
-            )
-        except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Image download failed: {e}")
-            # Continue without images
-
-        # Enhance images (optional)
-        images_to_enhance = [
-            img for img in content.images
-            if img.get("local_path") and not img.get("replaced_with_dutch")
-        ]
-        if not no_enhance and images_to_enhance:
-            progress.update(task, description="Enhancing images...")
+        # Handle images (download or use existing)
+        if no_download:
+            # Use existing downloaded/enhanced images
+            progress.update(task, description="Using existing images...")
+            content = use_existing_images(content, guide_subdir)
+            found = sum(1 for img in content.images if img.get("local_path") or img.get("enhanced_path"))
+            progress.update(task, description=f"Found {found}/{len(content.images)} existing images")
+        else:
+            # Download images
+            progress.update(task, description="Downloading images...")
             try:
-                content = enhance_all_images(
-                    content, guide_subdir, show_progress=True
-                )
-                enhanced = sum(1 for img in content.images if img.get("enhanced_path"))
+                content = await download_images(content, guide_subdir)
+                downloaded = sum(1 for img in content.images if img.get("local_path"))
                 progress.update(
-                    task,
-                    description=f"Enhanced {enhanced}/{len(images_to_enhance)} images",
+                    task, description=f"Downloaded {downloaded}/{len(content.images)} images"
                 )
             except Exception as e:
-                console.print(f"[yellow]Warning:[/yellow] Image enhancement failed: {e}")
-                # Continue without enhancement
+                console.print(f"[yellow]Warning:[/yellow] Image download failed: {e}")
+                # Continue without images
+
+            # Enhance images (optional)
+            images_to_enhance = [
+                img for img in content.images
+                if img.get("local_path") and not img.get("replaced_with_dutch")
+            ]
+            if not no_enhance and images_to_enhance:
+                progress.update(task, description="Enhancing images...")
+                try:
+                    content = enhance_all_images(
+                        content, guide_subdir, show_progress=True
+                    )
+                    enhanced = sum(1 for img in content.images if img.get("enhanced_path"))
+                    progress.update(
+                        task,
+                        description=f"Enhanced {enhanced}/{len(images_to_enhance)} images",
+                    )
+                except Exception as e:
+                    console.print(f"[yellow]Warning:[/yellow] Image enhancement failed: {e}")
+                    # Continue without enhancement
 
         # Translate content (optional)
         if not no_translate:
@@ -472,6 +548,7 @@ async def _generate_single(
     no_translate: bool,
     no_qrcode: bool,
     no_makecode: bool,
+    no_download: bool,
     progress: "Progress | None" = None,
 ) -> tuple[bool, str]:
     """Generate a single guide without console output (for batch processing).
@@ -484,6 +561,7 @@ async def _generate_single(
         no_translate: Skip Dutch translation.
         no_qrcode: Skip QR code generation.
         no_makecode: Skip MakeCode replacement.
+        no_download: Skip downloading/enhancing images (use existing files).
         progress: Optional shared Progress instance for nested progress display.
 
     Returns:
@@ -512,18 +590,23 @@ async def _generate_single(
             except Exception:
                 pass  # Continue with original images
 
-        # Download images
-        try:
-            content = await download_images(content, guide_subdir)
-        except Exception:
-            pass  # Continue without images
-
-        # Enhance images (optional)
-        if not no_enhance and any(img.get("local_path") for img in content.images):
+        # Handle images (download or use existing)
+        if no_download:
+            # Use existing downloaded/enhanced images
+            content = use_existing_images(content, guide_subdir)
+        else:
+            # Download images
             try:
-                content = enhance_all_images(content, guide_subdir, progress=progress)
+                content = await download_images(content, guide_subdir)
             except Exception:
-                pass  # Continue without enhancement
+                pass  # Continue without images
+
+            # Enhance images (optional)
+            if not no_enhance and any(img.get("local_path") for img in content.images):
+                try:
+                    content = enhance_all_images(content, guide_subdir, progress=progress)
+                except Exception:
+                    pass  # Continue without enhancement
 
         # Translate content (optional)
         if not no_translate:
@@ -555,6 +638,7 @@ async def _batch(
     no_translate: bool,
     no_qrcode: bool,
     no_makecode: bool,
+    no_download: bool,
 ) -> None:
     """Process all tutorials from an index page.
 
@@ -568,6 +652,7 @@ async def _batch(
         no_translate: Skip Dutch translation.
         no_qrcode: Skip QR code generation.
         no_makecode: Skip MakeCode replacement.
+        no_download: Skip downloading/enhancing images (use existing files).
     """
     settings = get_settings()
 
@@ -693,6 +778,7 @@ async def _batch(
                 no_translate,
                 no_qrcode,
                 no_makecode,
+                no_download,
                 progress=progress,
             )
 
@@ -753,7 +839,8 @@ def cli() -> None:
 @click.option("--no-translate", is_flag=True, default=False, help="Skip Dutch translation")
 @click.option("--no-qrcode", is_flag=True, default=False, help="Skip QR code generation for hyperlinks")
 @click.option("--no-makecode", is_flag=True, default=False, help="Skip MakeCode screenshot replacement")
-def generate(url: str, output: str | None, verbose: bool, no_enhance: bool, no_translate: bool, no_qrcode: bool, no_makecode: bool) -> None:
+@click.option("--no-download", is_flag=True, default=False, help="Skip downloading/enhancing images (use existing files)")
+def generate(url: str, output: str | None, verbose: bool, no_enhance: bool, no_translate: bool, no_qrcode: bool, no_makecode: bool, no_download: bool) -> None:
     """Generate a guide from a single tutorial URL.
 
     Downloads the tutorial page, extracts content, replaces MakeCode screenshots with
@@ -770,7 +857,7 @@ def generate(url: str, output: str | None, verbose: bool, no_enhance: bool, no_t
     # Use settings default if output not specified
     if output is None:
         output = str(get_settings().output_path)
-    asyncio.run(_generate(url, output, verbose, no_enhance, no_translate, no_qrcode, no_makecode))
+    asyncio.run(_generate(url, output, verbose, no_enhance, no_translate, no_qrcode, no_makecode, no_download))
 
 @cli.command()
 @click.option("--index", required=True, help="Index page URL containing tutorial links")
@@ -782,6 +869,7 @@ def generate(url: str, output: str | None, verbose: bool, no_enhance: bool, no_t
 @click.option("--no-translate", is_flag=True, default=False, help="Skip Dutch translation")
 @click.option("--no-qrcode", is_flag=True, default=False, help="Skip QR code generation")
 @click.option("--no-makecode", is_flag=True, default=False, help="Skip MakeCode screenshot replacement")
+@click.option("--no-download", is_flag=True, default=False, help="Skip downloading/enhancing images (use existing files)")
 def batch(
     index: str,
     output: str | None,
@@ -792,6 +880,7 @@ def batch(
     no_translate: bool,
     no_qrcode: bool,
     no_makecode: bool,
+    no_download: bool,
 ) -> None:
     """Generate guides from all tutorials on an index page.
 
@@ -825,6 +914,7 @@ def batch(
             no_translate,
             no_qrcode,
             no_makecode,
+            no_download,
         )
     )
 
