@@ -191,17 +191,22 @@ def post_process_markdown(markdown: str) -> str:
     Returns:
         The processed markdown content.
     """
-    # Remove any non-displayable characters (control characters except common whitespace)
-    # Keep: \t (tab), \n (newline), \r (carriage return)
-    # Remove: other control characters (0x00-0x1F, 0x7F-0x9F) except the ones above
+    # Remove all invisible characters comprehensively
+    # Control characters (0x00-0x1F, 0x7F-0x9F) except common whitespace (\t, \n, \r)
     markdown = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]', '', markdown)
+    # Zero-width characters and other invisible Unicode characters
+    markdown = re.sub(r'[\u200B-\u200D\uFEFF\u2060\u180E\u00AD]', '', markdown)
+    # Various spaces and separators that should be normalized
+    markdown = re.sub(r'[\u2000-\u200A\u202F\u205F\u3000]', ' ', markdown)  # Convert to regular space
+    # Line and paragraph separators
+    markdown = re.sub(r'[\u2028\u2029]', '\n', markdown)  # Convert to regular newline
 
     # Remove paragraph containing "Invoering" just after header 1
     # Pattern: # Header\n\n> Invoering\n\n or # Header\n\nInvoering\n\n
     markdown = re.sub(r'(^# .+\n\n)>? ?Invoering\n\n', r'\1', markdown, flags=re.MULTILINE)
 
     # Change title "Stap 1" to "Programmering"
-    markdown = re.sub(r'^# Stap 1', '# Programmering', markdown, flags=re.MULTILINE)
+    markdown = re.sub(r'^#+ Stap 1', '## Programmering', markdown, flags=re.MULTILINE)
 
     # Change specific hyperlink from elecfreaks.com to shop.elecfreaks.com
     old_url = "https://www.elecfreaks.com/nezha-inventor-s-kit-for-micro-bit-without-micro-bit-board.html"
@@ -213,22 +218,21 @@ def post_process_markdown(markdown: str) -> str:
         'Programmering',
         'Benodigde materialen',
         'Montage stappen',
+        'Montagestappen',
+        'Montage',
+        'Montagevideo',
         'Aansluitschema',
-        'Resultaat'
+        'Resultaat',
+        'Referentie'
     ]
 
     for header in headers_to_convert:
-        # Replace ### Header with ## Header, being more flexible with invisible characters
+        # Replace ### Header with ## Header
         replacement = f'## {header}'
-        # First, clean the specific line from invisible characters, then apply the pattern
         lines = markdown.split('\n')
         for i, line in enumerate(lines):
-            if re.match(rf'^### {re.escape(header)}', line):
-                # Clean the line from any remaining invisible characters
-                clean_line = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]', '', line)
-                clean_line = re.sub(r'[\u200B-\u200D\uFEFF]', '', clean_line)  # Zero-width characters
-                if re.match(rf'^### {re.escape(header)}\s*$', clean_line):
-                    lines[i] = replacement
+            if re.match(rf'^### {re.escape(header)}\s*$', line):
+                lines[i] = replacement
         markdown = '\n'.join(lines)
 
     # Fix title translations that weren't handled during translation
@@ -254,8 +258,9 @@ def post_process_markdown(markdown: str) -> str:
                 # Match image pattern that doesn't have qrcode class
                 img_match = re.match(r'^!\[\]\(([^)]+)\)$', next_line.strip())
                 if img_match and 'qrcode' not in next_line.lower():
-                    # Add scaling to make image smaller (similar to QR code size)
-                    scaled_img = f'![]({img_match.group(1)}|150)'
+                    # Add scaling to make image 50% smaller using HTML img tag format
+                    img_path = img_match.group(1)
+                    scaled_img = f'<img src="{img_path}" width="75" height="75">'
                     lines[i + 1] = scaled_img
     markdown = '\n'.join(lines)
 
