@@ -236,16 +236,10 @@ def post_process_markdown(markdown: str) -> str:
         markdown = '\n'.join(lines)
 
     # Fix title translations that weren't handled during translation
-    title_fixes = {
-        "Geval": "Project",
-        "Casus": "Project",
-        "Case": "Project"
-    }
-    for old_word, new_word in title_fixes.items():
-        # Fix in main title (first # header) - more flexible pattern
-        markdown = re.sub(rf'^# {old_word} (\d+):', rf'# {new_word} \1:', markdown, flags=re.MULTILINE)
-        # Also handle cases where there might be additional text after the case number
-        markdown = re.sub(rf'^# {old_word} (\d+): (.+)$', rf'# {new_word} \1: \2', markdown, flags=re.MULTILINE)
+    title_fixes = {"Geval", "Casus", "behuizing", "geval", "Case","kast"}
+    for old_word in title_fixes:
+        # Fix in main title (first # header) - handle complete title with description
+        markdown = re.sub(rf'^# {old_word} (\d+):? (.+)$', r'# Project \1: \2', markdown, flags=re.MULTILINE | re.IGNORECASE)
 
     # Scale down the first non-QR code image after "## Programmering" header
     lines = markdown.split('\n')
