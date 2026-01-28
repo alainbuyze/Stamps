@@ -261,8 +261,9 @@ def get_project_filename(case_number: str, title: str) -> str:
     Returns:
         Filename in format 'Project XX - Title' with ASCII-safe characters.
     """
-    # Strip "Project XX:" prefix from title to avoid duplication
-    title = re.sub(r'^[Pp]roject\s*\d+[:\s]*', '', title).strip()
+    # Strip "Project XX:" or "Les XX" prefixes from title to avoid duplication
+    title = re.sub(r'^[Pp]roject\s*\d+[:\s-]*', '', title).strip()
+    title = re.sub(r'^[Ll]es\s*\d+[:\s-]*', '', title).strip()
     # Normalize and convert to ASCII
     normalized = unicodedata.normalize('NFKD', title)
     ascii_title = normalized.encode('ascii', 'ignore').decode('ascii')
@@ -552,7 +553,9 @@ async def _generate(
     if qr_count > 0:
         message_parts.append(f"\n[bold]QR Codes:[/bold] {qr_count} generated")
 
-    message_parts.append(f"\n[bold]Output:[/bold] {output_path}")
+    # Show cleaner output path (directory + guide name)
+    message_parts.append(f"\n[bold]Output:[/bold] {output_dir}")
+    message_parts.append(f"\n[bold]Guide:[/bold] {filename}")
 
     console.print(
         Panel(
