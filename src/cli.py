@@ -1327,10 +1327,11 @@ if __name__ == "__main__":
         # Run the generation
         asyncio.run(_generate(url, output_dir, verbose, no_enhance, no_translate, no_qrcode, no_makecode, no_download))
         '''
-        index= "https://www.elecfreaks.com/learn-en/microbitKit/Wonder_Building_Kit/index.html#"
-        index= "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit-v2/"
+        # index= "https://www.elecfreaks.com/learn-en/microbitKit/Wonder_Building_Kit/index.html#"
+        #index= "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit-v2/"
         #index= "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/"
         #index = "https://wiki.elecfreaks.com/en/microbit/interesting-case/microbit-starter-kit/"
+        index = "https://wiki.elecfreaks.com/en/microbit/building-blocks/wonder-building-kit/"
         output= r"D:\Coderdojo\32 IN 1 Wonder Building Kit(EF08239)"
         
         verbose = True
