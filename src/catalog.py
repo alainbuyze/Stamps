@@ -75,8 +75,8 @@ def parse_guide_for_catalog(md_path: Path) -> ProjectSummary | None:
     title = title_match.group(1).strip()
 
     # Extract introduction section (## Introductie or ## Introduction)
-    # Look for content between Introductie heading and next heading
-    intro_pattern = r"##\s+(?:Introductie|Introduction)\s*(?:\u200B|\u200C|\u200D)?\s*\n(.*?)(?=\n###\s+(?:Benodigde\smaterialen|Materials\sRequired)\s*(?:\u200B|\u200C|\u200D)?\s*\n|\n##|\n#|\Z)"
+    # Look for content between Introductie heading and any other header (level 2 or 3)
+    intro_pattern = r"##\s+(?:Introductie|Introduction):?\s*(?:\u200B|\u200C|\u200D)?\s*\n(.*?)(?=\n#{2,3}\s+|\Z)"
     intro_match = re.search(intro_pattern, content, re.DOTALL | re.IGNORECASE)
 
     introduction = ""
@@ -102,7 +102,7 @@ def parse_guide_for_catalog(md_path: Path) -> ProjectSummary | None:
             introduction = introduction[:497] + "..."
 
     # Extract first image from introduction section
-    intro_section_pattern = r"##\s+(?:Introductie|Introduction)\s*(?:\u200B|\u200C|\u200D)?\s*\n(.*?)(?=\n###\s+(?:Benodigde\smaterialen|Materials\sRequired)\s*(?:\u200B|\u200C|\u200D)?\s*\n|\n##|\n#|\Z)"
+    intro_section_pattern = r"##\s+(?:Introductie|Introduction):?\s*(?:\u200B|\u200C|\u200D)?\s*\n(.*?)(?=\n#{2,3}\s+|\Z)"
     intro_section_match = re.search(intro_section_pattern, content, re.DOTALL | re.IGNORECASE)
 
     main_image = None
@@ -113,6 +113,25 @@ def parse_guide_for_catalog(md_path: Path) -> ProjectSummary | None:
             image_path = image_match.group(2)
             # Store image path as-is for markdown formatting in catalog
             main_image = image_path
+
+    # If no main image found, search for image with class="section-resultaat"
+    if not main_image:
+        # Look for HTML img tags with class="section-resultaat"
+        # Try both patterns: class before src, and src before class
+        resultaat_image_match = re.search(r'<img[^>]*class=["\'][^"\']*section-resultaat[^"\']*["\'][^>]*src=["\']([^"\']+)["\']', content, re.IGNORECASE)
+        if not resultaat_image_match:
+            resultaat_image_match = re.search(r'<img[^>]*src=["\']([^"\']+)["\'][^>]*class=["\'][^"\']*section-resultaat[^"\']*["\']', content, re.IGNORECASE)
+
+        if resultaat_image_match:
+            image_path = resultaat_image_match.group(1)
+            main_image = image_path
+        else:
+            # Also look for markdown images with class="section-resultaat" in alt text or nearby
+            resultaat_pattern = r'!\[([^\]]*section-resultaat[^\]]*)\]\(([^)]+)\)'
+            resultaat_match = re.search(resultaat_pattern, content, re.IGNORECASE)
+            if resultaat_match:
+                image_path = resultaat_match.group(2)
+                main_image = image_path
 
     slug = slugify(title)
 

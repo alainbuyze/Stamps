@@ -250,8 +250,8 @@ def post_process_markdown(markdown: str) -> str:
     new_url = "https://shop.elecfreaks.com/products/elecfreaks-micro-bit-nezha-48-in-1-inventors-kit-without-micro-bit-board"
     markdown = markdown.replace(old_url, new_url)
 
-    # Convert specific header 3 headers to header 2
-    headers_to_convert = [
+    # Headers to normalize to level 2, removing any trailing content
+    headers_to_convert = {
         'Programmering',
         'Benodigde materialen',
         'Montage stappen',
@@ -260,20 +260,80 @@ def post_process_markdown(markdown: str) -> str:
         'Montagevideo',
         'Aansluitschema',
         'Resultaat',
-        'Referentie'
-    ]
+        'Referentie',
+        'Hardware',
+        'Hardwareverbinding',
+        'Softwareprogrammering',
+        'Demonstratie',
+    }
 
-    for header in headers_to_convert:
-        # Replace ### Header with ## Header
-        replacement = f'## {header}'
-        lines = markdown.split('\n')
-        for i, line in enumerate(lines):
-            if re.match(rf'^### {re.escape(header)}\s*$', line):
-                lines[i] = replacement
-        markdown = '\n'.join(lines)
+    # Single pass: find all headers and convert matching ones to level 2
+    lines = markdown.split('\n')
+    for i, line in enumerate(lines):
+        # Match any header line (## to ######)
+        header_match = re.match(r'^(#{2,6})\s+(.+)$', line.rstrip())
+        if header_match:
+            hashes = header_match.group(1)
+            header_text = header_match.group(2)
+
+            # Clean header text: remove anchor links like [](#id "title") and strip
+            header_text_clean = re.sub(r'\s*\[]\(#[^)]*\)\s*$', '', header_text).strip()
+
+            # Check if this header starts with any of our target headers
+            for target in headers_to_convert:
+                if header_text_clean == target or header_text_clean.startswith(target + ' '):
+                    replacement = f'## {target}'
+                    if lines[i] != replacement:
+                        logger.debug(f"Converting header: {repr(line)} -> {repr(replacement)}")
+                        lines[i] = replacement
+                    break
+
+    markdown = '\n'.join(lines)
 
     # Note: Title word fixes (Geval->Project, etc.) are now handled in translator.py
     # via TITLE_WORD_FIXES and _apply_title_fixes()
+
+    # Remove entire chapters (header + content) for specified section names
+    chapters_to_remove = [
+        'Lesvoorbereiding',
+        'Demonstratie',
+        "Reflectie"
+    ]
+
+    lines = markdown.split('\n')
+    filtered_lines = []
+    skip_until_next_header = False
+    skip_header_level = 0
+
+    for line in lines:
+        # Check if this line is a header
+        header_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+        if header_match:
+            header_level = len(header_match.group(1))
+            header_text = header_match.group(2).strip()
+
+            if skip_until_next_header:
+                # Check if we've reached a header of same or higher level (fewer #'s)
+                if header_level <= skip_header_level:
+                    skip_until_next_header = False
+                else:
+                    # Still in the section to remove, skip this line
+                    continue
+
+            # Check if this header should be removed
+            if any(header_text == chapter or header_text.startswith(chapter + ' ')
+                   for chapter in chapters_to_remove):
+                skip_until_next_header = True
+                skip_header_level = header_level
+                continue
+
+        elif skip_until_next_header:
+            # Skip content lines while in a chapter to remove
+            continue
+
+        filtered_lines.append(line)
+
+    markdown = '\n'.join(filtered_lines)
 
     # Scale down the first non-QR code image after "## Programmering" header
     lines = markdown.split('\n')

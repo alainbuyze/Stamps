@@ -56,9 +56,7 @@ Examples:
         --no-download
 
     # List all tutorials on an index page
-    uv run python -m src.cli batch `
-        --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" `
-        --list-only
+no-enhance
 
     # Batch process all tutorials with resume capability
     uv run python -m src.cli batch `
@@ -236,19 +234,34 @@ def get_output_filename(url: str, title: str) -> str:
     return slugify(title)[:60]
 
 
-def extract_case_number(url: str) -> str | None:
-    """Extract case number from URL (e.g., '01' from 'case_01' or 'case-01').
+def extract_case_number(url: str, title: str | None = None) -> str | None:
+    """Extract case number from URL or title.
+
+    Tries URL first (e.g., '01' from 'case_01' or 'case-01'), then falls back
+    to extracting from title patterns like 'Project 01:', 'Case 01:', 'Les 01:'.
 
     Args:
         url: Tutorial URL to parse.
+        title: Optional title to extract case number from if URL doesn't contain it.
 
     Returns:
         Case number as string (e.g., '01', '12') or None if not found.
     """
+    # Try URL first
     parsed = urlparse(url)
     path = parsed.path.lower()
     match = re.search(r'case[_-]?(\d+)', path)
-    return match.group(1) if match else None
+    if match:
+        return match.group(1)
+
+    # Fall back to title patterns
+    if title:
+        # Match patterns like "Project 01:", "Case 01:", "Les 01:", "Project 01 -"
+        title_match = re.search(r'(?:project|case|les)\s*(\d+)', title, re.IGNORECASE)
+        if title_match:
+            return title_match.group(1)
+
+    return None
 
 
 def get_project_filename(case_number: str, title: str) -> str:
@@ -511,7 +524,7 @@ async def _generate(
             progress.update(task, description=f"Generated {qr_count} QR codes")
 
         # Rename to project-based name if case number found
-        case_number = extract_case_number(url)
+        case_number = extract_case_number(url, content.title)
         if case_number and content.title:
             new_filename = get_project_filename(case_number, content.title)
             guide_subdir, guide = rename_guide_directory(
@@ -716,7 +729,7 @@ async def _generate_single(
         guide = generate_guide(content, output_dir=guide_subdir, add_qrcodes=not no_qrcode)
 
         # Rename to project-based name if case number found
-        case_number = extract_case_number(url)
+        case_number = extract_case_number(url, content.title)
         if case_number and content.title:
             new_filename = get_project_filename(case_number, content.title)
             guide_subdir, guide = rename_guide_directory(

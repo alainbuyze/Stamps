@@ -305,21 +305,26 @@ def create_link_callback(base_path: Path):
             return uri[7:]
 
         # Handle absolute paths
-        path = Path(uri)
+        # Ensure URI is a string and decode URL-encoded characters
+        from urllib.parse import unquote
+        uri_str = str(uri) if not isinstance(uri, str) else uri
+        uri_decoded = unquote(uri_str)
+
+        path = Path(uri_decoded)
         if path.is_absolute():
             if path.exists():
                 return str(path)
-            return uri
+            return uri_decoded
 
         # Resolve relative paths against base_path
         # Convert backslashes to forward slashes for consistency
-        uri_normalized = uri.replace("\\", "/")
+        uri_normalized = uri_decoded.replace("\\", "/")
         resolved = base_path / uri_normalized
         if resolved.exists():
             return str(resolved)
 
         # Try with original path
-        resolved_original = base_path / uri
+        resolved_original = base_path / uri_decoded
         if resolved_original.exists():
             return str(resolved_original)
 
@@ -374,23 +379,40 @@ def markdown_to_pdf(
         else:
             base_path = output_path.parent
 
+        # Decode URL-encoded characters in base_path
+        from urllib.parse import unquote
+        if isinstance(base_path, str):
+            base_path = Path(unquote(base_path))
+        else:
+            # For Path objects, we need to decode the string representation
+            base_path = Path(unquote(str(base_path)))
+
         logger.debug(f"    -> Base path for images: {base_path}")
 
         # Create link callback with base path
         link_callback = create_link_callback(base_path)
 
         # Generate PDF using xhtml2pdf
-        with open(output_path, "wb") as pdf_file:
-            # Create PDF
-            pisa_status = pisa.CreatePDF(
-                src=html_content,
-                dest=pdf_file,
-                encoding="utf-8",
-                link_callback=link_callback,
-            )
+        pisa_status = None
+        try:
+            with open(output_path, "wb") as pdf_file:
+                # Create PDF
+                pisa_status = pisa.CreatePDF(
+                    src=html_content,
+                    dest=pdf_file,
+                    encoding="utf-8",
+                    link_callback=link_callback,
+                )
 
-            if pisa_status.err:
-                raise GenerationError(f"xhtml2pdf reported {pisa_status.err} errors")
+                if pisa_status.err:
+                    raise GenerationError(f"xhtml2pdf reported {pisa_status.err} errors")
+        finally:
+            # Explicitly clean up any remaining resources
+            if pisa_status and hasattr(pisa_status, 'document') and pisa_status.document:
+                try:
+                    pisa_status.document.cleanup()
+                except Exception:
+                    pass  # Ignore cleanup errors
 
         logger.debug(f"    -> PDF saved: {output_path}")
         return output_path
@@ -455,8 +477,11 @@ def markdown_file_to_pdf(
 if __name__ == "__main__":
     """Main function to print a specific markdown file to PDF."""
 
+    # Set log level to DEBUG
+    logging.getLogger().setLevel(logging.DEBUG)
+
     # Hardcoded input file path
-    input_file = Path(r"D:\Coderdojo\Projects\nezha-inventor-s-kit-for-microbit-case-61.md")
+    input_file = Path(r"D:\Coderdojo\Nezha Inventors Kit V2(EF08288)\Project 01 - De Pull Ups-robot.md") ##"D:\Coderdojo\Projects\nezha-inventor-s-kit-for-microbit-case-61.md")
 
     try:
         print(f"Converting {input_file} to PDF...")

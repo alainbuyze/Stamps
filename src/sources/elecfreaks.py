@@ -24,6 +24,8 @@ class ElecfreaksAdapter(BaseSourceAdapter):
     DOMAIN_PATTERNS = [
         "wiki.elecfreaks.com",
         "elecfreaks.com/wiki",
+        "elecfreaks.com/learn-en",
+        "www.elecfreaks.com/learn-en",
     ]
 
     # CSS selectors for content removal (navigation, sidebars, etc.)
@@ -51,6 +53,9 @@ class ElecfreaksAdapter(BaseSourceAdapter):
         "article .markdown",
         ".markdown",
         "article",
+        "div.body",  # Sphinx documentation
+        ".documentwrapper",  # Sphinx documentation
+        "[role='main']",  # Accessibility role
         "main",
         ".docMainContainer",
     ]
@@ -220,8 +225,10 @@ class ElecfreaksAdapter(BaseSourceAdapter):
     def extract_tutorial_links(self, soup: BeautifulSoup, url: str) -> list[TutorialLink]:
         """Extract tutorial links from an Elecfreaks index page.
 
-        Extracts case tutorial links from the navigation sidebar. Links
-        are identified by containing "case" in the URL path.
+        Extracts tutorial links from multiple sources:
+        1. Card-based tutorial listings (article.margin--md with card links) - Docusaurus
+        2. Sphinx-style reference links (a.reference.internal with Case_ in href)
+        3. Navigation sidebar links containing "case" in the URL path
 
         Args:
             soup: Parsed HTML as BeautifulSoup object.
@@ -235,7 +242,76 @@ class ElecfreaksAdapter(BaseSourceAdapter):
         tutorials: list[TutorialLink] = []
         seen_urls: set[str] = set()
 
-        # Find all links in the page
+        # Method 1: Find card-based tutorials (article elements with card links)
+        for article in soup.find_all("article", class_="margin--md"):
+            # Find the card link inside the article
+            card_link = article.find("a", class_=lambda c: c and ("card" in c or "cardContainer" in c))
+            if not card_link:
+                continue
+
+            href = card_link.get("href", "")
+            if not href:
+                continue
+
+            # Extract title from h2 with cardTitle class or text--truncate
+            title_elem = article.find("h2", class_=lambda c: c and ("cardTitle" in c or "text--truncate" in c))
+            if title_elem:
+                # Prefer the title attribute if available (full text)
+                title = title_elem.get("title") or title_elem.get_text(strip=True)
+            else:
+                title = card_link.get_text(strip=True)
+
+            if not title:
+                continue
+
+            # Make URL absolute
+            href = self._make_absolute_url(href, url)
+
+            # Skip duplicates and current page
+            if href in seen_urls or href.rstrip("/") == url.rstrip("/"):
+                continue
+            seen_urls.add(href)
+
+            tutorials.append(TutorialLink(url=href, title=title))
+            logger.debug(f"    -> Found card tutorial: {title}")
+
+        # Method 2: Find Sphinx-style reference links (a.reference.internal)
+        # Pattern: <a class="reference internal" href="Case_01.html#section">Title</a>
+        for link in soup.find_all("a", class_="reference"):
+            classes = link.get("class", [])
+            if "internal" not in classes:
+                continue
+
+            href = link.get("href", "")
+            text = link.get_text(strip=True)
+
+            if not href or not text:
+                continue
+
+            # Look for Case_ pattern in href (e.g., Case_01.html)
+            if not re.search(r"case[_\-]?\d+", href, re.IGNORECASE):
+                continue
+
+            # Remove anchor fragment for deduplication (Case_01.html#link -> Case_01.html)
+            base_href = href.split("#")[0] if "#" in href else href
+
+            # Make URL absolute
+            abs_href = self._make_absolute_url(base_href, url)
+
+            # Skip duplicates
+            if abs_href in seen_urls:
+                continue
+            seen_urls.add(abs_href)
+
+            # Clean up title - remove leading number prefix (e.g., "3.2. Link" -> "Link")
+            clean_title = re.sub(r"^\d+\.\d+\.\s*", "", text).strip()
+            if not clean_title:
+                clean_title = text.strip()
+
+            tutorials.append(TutorialLink(url=abs_href, title=clean_title))
+            logger.debug(f"    -> Found Sphinx tutorial: {clean_title}")
+
+        # Method 3: Find sidebar links containing "case" in the path
         for link in soup.find_all("a", href=True):
             href = link.get("href", "")
             text = link.get_text(strip=True)
@@ -250,10 +326,7 @@ class ElecfreaksAdapter(BaseSourceAdapter):
                 continue
 
             # Make URL absolute
-            if href.startswith("/"):
-                href = urljoin(url, href)
-            elif not href.startswith(("http://", "https://")):
-                href = urljoin(url, href)
+            href = self._make_absolute_url(href, url)
 
             # Skip if we've already seen this URL
             if href in seen_urls:
@@ -268,7 +341,21 @@ class ElecfreaksAdapter(BaseSourceAdapter):
             title = text.strip()
 
             tutorials.append(TutorialLink(url=href, title=title))
-            logger.debug(f"    -> Found tutorial: {title}")
+            logger.debug(f"    -> Found case tutorial: {title}")
 
         logger.info(f"    -> Found {len(tutorials)} tutorials")
         return tutorials
+
+    def _make_absolute_url(self, href: str, base_url: str) -> str:
+        """Convert a relative URL to absolute.
+
+        Args:
+            href: The URL to convert (may be relative or absolute).
+            base_url: The base URL for resolving relative paths.
+
+        Returns:
+            Absolute URL string.
+        """
+        if href.startswith(("http://", "https://")):
+            return href
+        return urljoin(base_url, href)

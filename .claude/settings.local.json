@@ -2,7 +2,6 @@
   "env": {
     "SHELL": "powershell"
   },
-
   "permissions": {
     "allow": [
       "WebFetch(domain:wiki.elecfreaks.com)",
@@ -80,7 +79,8 @@
       "Bash(powershell -Command:*)",
       "mcp__MCP_DOCKER__issue_write",
       "mcp__ide__getDiagnostics",
-      "mcp__ide__executeCode"
+      "mcp__ide__executeCode",
+      "WebFetch(domain:www.elecfreaks.com)"
     ]
   }
 }

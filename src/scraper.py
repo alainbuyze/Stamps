@@ -67,35 +67,23 @@ async def _fetch_page_once(url: str, timeout: int | None = None) -> str:
             if response.status >= 400:
                 raise ScrapingError(f"HTTP {response.status} for URL: {url}")
 
-            # Wait for DOM to be ready (faster than networkidle)
-            await page.wait_for_load_state("domcontentloaded", timeout=effective_timeout)
-            logger.debug("    -> DOM content loaded")
+            # Wait for page to fully load (including network idle)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=effective_timeout)
+                logger.debug("    -> Network idle reached")
+            except TimeoutError:
+                # Fallback to domcontentloaded if networkidle times out
+                logger.debug("    -> Network idle timeout, checking DOM")
+                await page.wait_for_load_state("domcontentloaded", timeout=effective_timeout)
 
-            # For Docusaurus/React sites, wait for main content to render
-            # Try multiple selectors that indicate content is ready
-            content_selectors = [
-                "article",  # Docusaurus main content
-                ".markdown",  # Docusaurus markdown content
-                "main",  # Generic main content
-                ".theme-doc-markdown",  # Docusaurus doc content
-            ]
+            # Simple check: ensure body has content
+            body_has_content = await page.evaluate("document.body && document.body.innerHTML.length > 100")
+            if body_has_content:
+                logger.debug("    -> Page has content")
+            else:
+                logger.warning("    -> Page body appears empty")
 
-            content_loaded = False
-            for selector in content_selectors:
-                try:
-                    await page.wait_for_selector(selector, timeout=5000)
-                    logger.debug(f"    -> Content selector '{selector}' found")
-                    content_loaded = True
-                    break
-                except TimeoutError:
-                    continue
-
-            if not content_loaded:
-                # Fallback: just wait a bit for JS to execute
-                logger.debug("    -> No content selector found, waiting for JS execution")
-                await asyncio.sleep(1)
-
-            # Small additional delay for any remaining rendering
+            # Small delay for any remaining rendering
             await asyncio.sleep(0.5)
             logger.debug("    -> Page ready")
 
