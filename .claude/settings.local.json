@@ -1,6 +1,6 @@
 {
   "env": {
-    "SHELL": "powershell"
+    "SHELL": "wsl"
   },
   "permissions": {
     "allow": [

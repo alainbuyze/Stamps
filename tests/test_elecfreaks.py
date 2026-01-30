@@ -66,6 +66,43 @@ def test_extract_images():
     assert content.images[0]["alt"] == "Image 1"
 
 
+def test_extract_images_updates_relative_urls_in_html():
+    """Test that relative image URLs in HTML are updated to absolute URLs.
+
+    This ensures sections (which contain references to the same Tag objects)
+    will have absolute src attributes that match the image_map keys.
+    """
+    adapter = ElecfreaksAdapter()
+
+    html = """
+    <html>
+    <body>
+    <article>
+        <h1>Test</h1>
+        <p>Intro paragraph</p>
+        <img src="../../_images/step-01.png" alt="Step 1" />
+        <img src="../images/step-02.png" alt="Step 2" />
+    </article>
+    </body>
+    </html>
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    content = adapter.extract(soup, "https://wiki.elecfreaks.com/en/microbit/kit/case_01")
+
+    # Images list should have absolute URLs
+    assert len(content.images) == 2
+    assert content.images[0]["src"].startswith("https://")
+    assert content.images[1]["src"].startswith("https://")
+
+    # The img tags in the soup should also be updated to absolute URLs
+    img_tags = soup.find_all("img")
+    assert img_tags[0]["src"].startswith("https://")
+    assert img_tags[1]["src"].startswith("https://")
+    # Verify the URLs match what's in the images list
+    assert img_tags[0]["src"] == content.images[0]["src"]
+    assert img_tags[1]["src"] == content.images[1]["src"]
+
+
 def test_extract_removes_navigation():
     """Test that navigation elements are removed."""
     adapter = ElecfreaksAdapter()

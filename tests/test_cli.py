@@ -259,3 +259,33 @@ def test_rename_guide_directory_same_name():
         assert new_dir == output_dir / "same-name"
         assert updated_md == markdown
         assert old_dir.exists()
+
+
+def test_get_project_filename_leading_number_prefix():
+    """Test project filename strips leading number prefix like '3.'."""
+    result = get_project_filename("01", "3.Project 01: De motorfiets")
+    assert result == "Project 01 - De motorfiets"
+
+
+def test_get_project_filename_trailing_hash():
+    """Test project filename strips trailing # character."""
+    result = get_project_filename("01", "De motorfiets#")
+    assert result == "Project 01 - De motorfiets"
+
+
+def test_get_project_filename_both_prefix_and_hash():
+    """Test project filename strips both leading number and trailing #."""
+    result = get_project_filename("01", "3.Project 01: De motorfiets#")
+    assert result == "Project 01 - De motorfiets"
+
+
+def test_get_project_filename_project_prefix_only():
+    """Test project filename strips Project XX: prefix without leading number."""
+    result = get_project_filename("05", "Project 05: Robot Arm")
+    assert result == "Project 05 - Robot Arm"
+
+
+def test_get_project_filename_les_prefix():
+    """Test project filename strips Les XX prefix."""
+    result = get_project_filename("12", "Les 12: Sensor Demo")
+    assert result == "Project 12 - Sensor Demo"

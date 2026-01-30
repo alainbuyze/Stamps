@@ -160,12 +160,20 @@ Dependencies:
 - rich: Terminal formatting and progress display
 """
 
+import sys
+from pathlib import Path
+
+# Ensure src package is importable when running script directly
+if __name__ == "__main__":
+    _project_root = Path(__file__).resolve().parent.parent
+    if str(_project_root) not in sys.path:
+        sys.path.insert(0, str(_project_root))
+
 import asyncio
 import json
 import re
 import shutil
 import unicodedata
-from pathlib import Path
 from urllib.parse import urlparse
 
 import click
@@ -274,9 +282,13 @@ def get_project_filename(case_number: str, title: str) -> str:
     Returns:
         Filename in format 'Project XX - Title' with ASCII-safe characters.
     """
+    # Strip leading number prefix (e.g., "3." from "3.Project 01:")
+    title = re.sub(r'^\d+\.\s*', '', title).strip()
     # Strip "Project XX:" or "Les XX" prefixes from title to avoid duplication
     title = re.sub(r'^[Pp]roject\s*\d+[:\s-]*', '', title).strip()
     title = re.sub(r'^[Ll]es\s*\d+[:\s-]*', '', title).strip()
+    # Strip trailing # (often from anchors)
+    title = re.sub(r'#\s*$', '', title).strip()
     # Normalize and convert to ASCII
     normalized = unicodedata.normalize('NFKD', title)
     ascii_title = normalized.encode('ascii', 'ignore').decode('ascii')
@@ -1296,7 +1308,7 @@ if __name__ == "__main__":
     else:
         # Run hardcoded test mode
         print("No parameters provided, running hardcoded test...")
-        
+        '''
         # Hardcoded test parameters
         url = "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/Nezha_Inventor_s_kit_for_microbit_case_75"
         output_dir = "D:/Coderdojo/Projects"  # Renamed to avoid conflict with function parameter
@@ -1314,3 +1326,19 @@ if __name__ == "__main__":
 
         # Run the generation
         asyncio.run(_generate(url, output_dir, verbose, no_enhance, no_translate, no_qrcode, no_makecode, no_download))
+        '''
+        index= "https://www.elecfreaks.com/learn-en/microbitKit/Wonder_Building_Kit/index.html#"
+        index= "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit-v2/"
+        #index= "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/"
+        #index = "https://wiki.elecfreaks.com/en/microbit/interesting-case/microbit-starter-kit/"
+        output= r"D:\Coderdojo\32 IN 1 Wonder Building Kit(EF08239)"
+        
+        verbose = True
+        list_only = True
+        resume = False
+        no_enhance = True
+        no_translate = True
+        no_qrcode = True
+        no_makecode = True
+        no_download = True
+        asyncio.run(_batch(index,output,verbose,list_only,resume,no_enhance,no_translate,no_qrcode,no_makecode,no_download))

@@ -60,12 +60,6 @@ class ElecfreaksAdapter(BaseSourceAdapter):
         ".docMainContainer",
     ]
 
-    # CSS selectors for tutorial link containers (searched in order)
-    TUTORIAL_CONTAINER_SELECTORS = [
-        "div.article.row",
-        "div.theme-doc-markdown.markdown",
-    ]
-
     def can_handle(self, url: str) -> bool:
         """Check if this adapter can handle the given URL.
 
@@ -190,7 +184,12 @@ class ElecfreaksAdapter(BaseSourceAdapter):
         return sections
 
     def _extract_images(self, content: Tag, base_url: str) -> list[dict]:
-        """Extract images from the content."""
+        """Extract images from the content.
+
+        Also updates img tags in place with absolute URLs so that
+        sections (which reference the same Tag objects) will have
+        matching src attributes for the image map lookup.
+        """
         images = []
 
         for img in content.find_all("img"):
@@ -203,6 +202,9 @@ class ElecfreaksAdapter(BaseSourceAdapter):
                 src = "https:" + src
             elif not src.startswith(("http://", "https://")):
                 src = urljoin(base_url, src)
+
+            # Update the img tag with absolute URL so sections have matching src
+            img["src"] = src
 
             alt = img.get("alt", "")
             title = img.get("title", "")
@@ -231,8 +233,11 @@ class ElecfreaksAdapter(BaseSourceAdapter):
     def extract_tutorial_links(self, soup: BeautifulSoup, url: str) -> list[TutorialLink]:
         """Extract tutorial links from an Elecfreaks index page.
 
-        Searches for tutorial links only within containers defined in
-        TUTORIAL_CONTAINER_SELECTORS (div.article.row, div.theme-doc-markdown.markdown).
+        Extracts tutorial links from multiple sources:
+        1. Card-based tutorial listings (article.margin--md with card links) - Docusaurus
+        2. Sphinx-style reference links (a.reference.internal with Case_ in href)
+        3. Sphinx toctree structure (div.toctree-wrapper with li.toctree-l1 links)
+        4. Navigation sidebar links containing "case" in the URL path
 
         Args:
             soup: Parsed HTML as BeautifulSoup object.
@@ -246,62 +251,127 @@ class ElecfreaksAdapter(BaseSourceAdapter):
         tutorials: list[TutorialLink] = []
         seen_urls: set[str] = set()
 
-        # Find tutorial containers using hard-coded selectors
-        containers: list[Tag] = []
-        for selector in self.TUTORIAL_CONTAINER_SELECTORS:
-            found = soup.select(selector)
-            containers.extend(found)
-            if found:
-                logger.debug(f"    -> Found {len(found)} container(s) with selector: {selector}")
+        # Track counts for each extraction method
+        method_counts = {
+            "card": 0,
+            "sphinx": 0,
+            "toctree": 0,
+            "sidebar": 0
+        }
 
-        if not containers:
-            logger.warning("    -> No tutorial containers found")
-            return tutorials
+        # Method 1: Find card-based tutorials (article elements with card links)
+        for article in soup.find_all("article", class_="margin--md"):
+            # Find the card link inside the article
+            card_link = article.find("a", class_=lambda c: c and ("card" in c or "cardContainer" in c))
+            if not card_link:
+                continue
 
-        # Search for links only within the containers
-        for container in containers:
-            for link in container.find_all("a", href=True):
+            href = card_link.get("href", "")
+            if not href:
+                continue
+
+            # Extract title from h2 with cardTitle class or text--truncate
+            title_elem = article.find("h2", class_=lambda c: c and ("cardTitle" in c or "text--truncate" in c))
+            if title_elem:
+                # Prefer the title attribute if available (full text)
+                title = title_elem.get("title") or title_elem.get_text(strip=True)
+            else:
+                title = card_link.get_text(strip=True)
+
+            if not title:
+                continue
+
+            # Make URL absolute
+            href = self._make_absolute_url(href, url)
+
+            # Skip duplicates and current page
+            if href in seen_urls or href.rstrip("/") == url.rstrip("/"):
+                continue
+            seen_urls.add(href)
+
+            tutorials.append(TutorialLink(url=href, title=title))
+            method_counts["card"] += 1
+            logger.debug(f"    -> Found card tutorial: {title}")
+
+        # Method 2: Find Sphinx-style reference links (a.reference.internal)
+        # Pattern: <a class="reference internal" href="Case_01.html#section">Title</a>
+        for link in soup.find_all("a", class_="reference"):
+            classes = link.get("class", [])
+            if "internal" not in classes:
+                continue
+
+            href = link.get("href", "")
+            text = link.get_text(strip=True)
+
+            if not href or not text:
+                continue
+
+            # Look for Case_ pattern in href (e.g., Case_01.html)
+            if not re.search(r"case[_\-]?\d+", href, re.IGNORECASE):
+                continue
+
+            # Remove anchor fragment for deduplication (Case_01.html#link -> Case_01.html)
+            base_href = href.split("#")[0] if "#" in href else href
+
+            # Make URL absolute
+            abs_href = self._make_absolute_url(base_href, url)
+
+            # Skip duplicates
+            if abs_href in seen_urls:
+                continue
+            seen_urls.add(abs_href)
+
+            # Clean up title - remove leading number prefix (e.g., "3.2. Link" -> "Link")
+            clean_title = re.sub(r"^\d+\.\d+\.\s*", "", text).strip()
+            if not clean_title:
+                clean_title = text.strip()
+
+            tutorials.append(TutorialLink(url=abs_href, title=clean_title))
+            method_counts["sphinx"] += 1
+            logger.debug(f"    -> Found Sphinx tutorial: {clean_title}")
+
+        # Method 3: Find Sphinx toctree links (top-level only)
+        # Pattern: <div class="toctree-wrapper compound"><ul><li class="toctree-l1"><a>...</a></li>
+        for toctree in soup.find_all("div", class_="toctree-wrapper"):
+            for li in toctree.find_all("li", class_="toctree-l1"):
+                link = li.find("a", class_="reference")
+                if not link:
+                    continue
+
+                classes = link.get("class", [])
+                if "internal" not in classes:
+                    continue
+
                 href = link.get("href", "")
                 text = link.get_text(strip=True)
 
-                # Skip empty links
                 if not href or not text:
                     continue
 
-                # Make URL absolute
-                href = self._make_absolute_url(href, url)
+                # Skip non-tutorial pages (like safety instructions)
+                # Look for Case/case pattern in href or text
+                is_case_href = re.search(r"case[_\-]?\d+", href, re.IGNORECASE)
+                is_case_text = re.search(r"case\s*\d+", text, re.IGNORECASE)
 
-                # Skip duplicates and current page
-                if href in seen_urls or href.rstrip("/") == url.rstrip("/"):
+                if not is_case_href and not is_case_text:
                     continue
-                seen_urls.add(href)
 
-                tutorials.append(TutorialLink(url=href, title=text.strip()))
-                logger.debug(f"    -> Found tutorial: {text.strip()}")
+                # Make URL absolute
+                abs_href = self._make_absolute_url(href, url)
 
-        logger.info(f"    -> Found {len(tutorials)} tutorials")
-        return tutorials
+                # Skip duplicates
+                if abs_href in seen_urls:
+                    continue
+                seen_urls.add(abs_href)
+                # Clean up title - remove leading number prefix (e.g., "3. Case 01:" -> "Case 01:")
+                clean_title = re.sub(r"^\d+\.\s*", "", text).strip()
 
+                tutorials.append(TutorialLink(url=abs_href, title=clean_title))
+                method_counts["toctree"] += 1
+                logger.debug(f"    -> Found toctree tutorial: {clean_title}")
 
-    def extract_tutorial_linksx(self, soup: BeautifulSoup, url: str) -> list[TutorialLink]:
-        """Extract tutorial links from an Elecfreaks index page.
-
-        Extracts case tutorial links from the navigation sidebar. Links
-        are identified by containing "case" in the URL path.
-
-        Args:
-            soup: Parsed HTML as BeautifulSoup object.
-            url: The source URL for context.
-
-        Returns:
-            List of TutorialLink objects with url and title.
-        """
-        logger.debug(f" * {inspect.currentframe().f_code.co_name} > Extracting tutorial links from: {url}")
-
-        tutorials: list[TutorialLink] = []
-        seen_urls: set[str] = set()
-
-        # Find all links in the page
+        # Method 4: Find sidebar links containing "case" in the path
+        '''
         for link in soup.find_all("a", href=True):
             href = link.get("href", "")
             text = link.get_text(strip=True)
@@ -316,10 +386,7 @@ class ElecfreaksAdapter(BaseSourceAdapter):
                 continue
 
             # Make URL absolute
-            if href.startswith("/"):
-                href = urljoin(url, href)
-            elif not href.startswith(("http://", "https://")):
-                href = urljoin(url, href)
+            href = self._make_absolute_url(href, url)
 
             # Skip if we've already seen this URL
             if href in seen_urls:
@@ -334,9 +401,16 @@ class ElecfreaksAdapter(BaseSourceAdapter):
             title = text.strip()
 
             tutorials.append(TutorialLink(url=href, title=title))
-            logger.debug(f"    -> Found tutorial: {title}")
-
-        logger.info(f"    -> Found {len(tutorials)} tutorials")
+            method_counts["sidebar"] += 1
+            logger.debug(f"    -> Found case tutorial: {title}")
+'''
+        # Log method breakdown
+        method_summary = ", ".join([f"{method}: {count}" for method, count in method_counts.items() if count > 0])
+        if method_summary:
+            logger.info(f"    -> Found {len(tutorials)} tutorials ({method_summary})")
+        else:
+            logger.info(f"    -> Found {len(tutorials)} tutorials")
+        
         return tutorials
 
     def _make_absolute_url(self, href: str, base_url: str) -> str:

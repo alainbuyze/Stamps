@@ -1,4 +1,136 @@
-"""Markdown generator for creating printable guides."""
+"""CoderDojo Guide Generator - Markdown generation for printable guides.
+
+This module provides comprehensive functionality for converting extracted web content
+into well-structured Markdown documents suitable for printing and PDF generation.
+It handles HTML-to-Markdown conversion, image processing, content organization,
+and post-processing optimizations.
+
+## Core Features
+
+- **HTML to Markdown Conversion**: Custom converter that preserves image URLs and
+  applies section-based CSS classes for targeted styling
+- **Image Processing**: Maps remote URLs to local paths, applies scaling, and
+  handles image organization by content sections
+- **Content Structuring**: Organizes content into hierarchical sections with
+  proper heading levels and metadata handling
+- **Post-Processing**: Applies content cleanup, header normalization, chapter
+  removal, and table of contents generation
+- **QR Code Integration**: Optionally generates QR codes for hyperlinks
+- **Error Handling**: Comprehensive error handling with detailed context logging
+
+## Function Tree
+
+```
+generator.py
+├── heading_to_class(heading: str) -> str
+│   └── Converts section headings to valid CSS class names
+├── GuideMarkdownConverter(MarkdownConverter)
+│   ├── __init__(image_map, section_class, **kwargs)
+│   └── convert_img(el, text, convert_as_inline, **kwargs) -> str
+│       └── Converts img tags to HTML with section classes and scaling
+├── html_to_markdown(html, image_map, section_class) -> str
+│   └── Converts HTML to Markdown using custom converter
+├── build_image_map(content: ExtractedContent) -> dict[str, str]
+│   └── Builds mapping from remote URLs to local image paths
+├── generate_table_of_contents(markdown: str) -> str
+│   └── Generates table of contents from header 2 entries
+├── post_process_markdown(markdown: str) -> str
+│   └── Applies comprehensive content cleanup and optimization
+├── generate_guide(content, output_dir, add_qrcodes) -> str
+│   └── Main function: generates complete Markdown guide from content
+└── save_guide(guide: str, output_path: Path) -> Path
+    └── Saves guide to file with proper error handling
+```
+
+## Usage Examples
+
+### Basic Guide Generation
+
+```python
+from pathlib import Path
+from src.generator import generate_guide, save_guide
+from src.sources.base import ExtractedContent
+
+# Create or load extracted content
+content = ExtractedContent(
+    title="My CoderDojo Project",
+    sections=[...],  # List of section dictionaries
+    images=[...],    # List of image dictionaries
+    metadata={...}   # Optional metadata
+)
+
+# Generate guide without QR codes
+guide = generate_guide(content, add_qrcodes=False)
+
+# Save to file
+output_path = Path("output/my_guide.md")
+save_guide(guide, output_path)
+```
+
+### Advanced Guide Generation with QR Codes
+
+```python
+from pathlib import Path
+from src.generator import generate_guide, save_guide
+
+# Generate guide with QR codes for all hyperlinks
+output_dir = Path("output")
+guide = generate_guide(
+    content=content,
+    output_dir=output_dir,  # Required for QR codes
+    add_qrcodes=True
+)
+
+# Save and get QR code files
+output_path = output_dir / "complete_guide.md"
+saved_path = save_guide(guide, output_path)
+print(f"Guide saved to: {saved_path}")
+```
+
+### Custom HTML to Markdown Conversion
+
+```python
+from bs4 import BeautifulSoup
+from src.generator import html_to_markdown
+
+# Convert HTML content with custom image mapping
+html_content = "<h2>Section</h2><img src='remote.jpg'>"
+image_map = {"remote.jpg": "local/path/image.jpg"}
+
+markdown = html_to_markdown(
+    html=html_content,
+    image_map=image_map,
+    section_class="section-my-section"
+)
+```
+
+## Configuration
+
+The module uses settings from `src.core.config.get_settings()`:
+- `IMAGE_SCALE`: Scaling factor for image dimensions (default: 1.0)
+
+## Dependencies
+
+- `markdownify`: Base Markdown conversion
+- `beautifulsoup4`: HTML parsing and manipulation
+- `pathlib`: Path handling for file operations
+- `re`: Regular expressions for content processing
+
+## Error Handling
+
+All functions include comprehensive error handling with:
+- Detailed error messages with context
+- Logging at appropriate levels (debug, error)
+- Custom `GenerationError` exceptions for recoverable failures
+
+## Integration
+
+This module integrates with:
+- `src.core.config`: Configuration management
+- `src.core.errors`: Custom error types
+- `src.qrcode_processor`: QR code generation for links
+- `src.sources.base`: Content extraction interfaces
+"""
 
 import inspect
 import logging
@@ -20,11 +152,34 @@ logger = logging.getLogger(__name__)
 def heading_to_class(heading: str) -> str:
     """Convert a section heading to a valid CSS class name.
 
+    This function transforms section headings into CSS-compatible class names
+    that can be used for targeted styling in HTML/CSS output. It handles special
+    characters, normalization, and ensures valid CSS identifier format.
+
+    The conversion process:
+    1. Convert to lowercase
+    2. Remove non-alphanumeric characters (except spaces and hyphens)
+    3. Replace spaces with hyphens
+    4. Normalize multiple consecutive hyphens
+    5. Remove leading/trailing hyphens
+    6. Prefix with 'section-' for namespacing
+
     Args:
-        heading: The section heading text.
+        heading: The section heading text to convert. Can be empty string.
 
     Returns:
-        A valid CSS class name prefixed with 'section-'.
+        A valid CSS class name prefixed with 'section-'. For empty input,
+        returns 'section-content'.
+
+    Examples:
+        >>> heading_to_class("Programming Steps")
+        'section-programming-steps'
+        >>> heading_to_class("Hardware & Software!")
+        'section-hardware-software'
+        >>> heading_to_class("")
+        'section-content'
+        >>> heading_to_class("  Multiple   Spaces  ")
+        'section-multiple-spaces'
     """
     if not heading:
         return "section-content"
@@ -35,12 +190,37 @@ def heading_to_class(heading: str) -> str:
     class_name = re.sub(r"-+", "-", class_name)
     return f"section-{class_name.strip('-')}"
 
-
 class GuideMarkdownConverter(MarkdownConverter):
-    """Custom Markdown converter that preserves image URLs.
+    """Custom Markdown converter that preserves image URLs and adds section classes.
 
-    Can optionally use local image paths from an image map.
-    Outputs HTML img tags with section-based CSS classes.
+    This converter extends the base MarkdownConverter to provide specialized
+    functionality for CoderDojo guide generation:
+
+    - **Image URL Preservation**: Maintains original image URLs while optionally
+      substituting local paths from an image map
+    - **Section-Based CSS Classes**: Adds CSS classes to images based on their
+      content section for targeted styling in PDF generation
+    - **Image Scaling**: Applies configurable scaling to image dimensions
+    - **HTML Output**: Outputs HTML img tags instead of Markdown image syntax
+      to preserve CSS classes and attributes
+
+    The converter is designed to work with the guide generation pipeline where
+    images need to be styled differently based on their section context
+    (e.g., header images vs. content images vs. programming examples).
+
+    Attributes:
+        image_map: Dictionary mapping remote URLs to local file paths
+        section_class: CSS class name applied to images in the current section
+
+    Example:
+        >>> image_map = {"https://example.com/img.jpg": "local/img.jpg"}
+        >>> converter = GuideMarkdownConverter(
+        ...     image_map=image_map,
+        ...     section_class="section-programming"
+        ... )
+        >>> html = '<img src="https://example.com/img.jpg" alt="Example">'
+        >>> result = converter.convert(html)
+        # Returns HTML with local path and CSS class
     """
 
     def __init__(
@@ -48,13 +228,33 @@ class GuideMarkdownConverter(MarkdownConverter):
         image_map: dict[str, str] | None = None,
         section_class: str | None = None,
         **kwargs,
-    ):
-        """Initialize converter with optional image mapping.
+        ):
+        """Initialize converter with optional image mapping and section class.
+
+        Sets up the converter with configuration for image processing and
+        section-based styling. The image map allows substitution of remote URLs
+        with local paths for offline access or optimized loading.
 
         Args:
-            image_map: Dict mapping remote URLs to local paths.
-            section_class: CSS class name for images in this section.
-            **kwargs: Arguments passed to parent MarkdownConverter.
+            image_map: Optional dictionary mapping remote URLs to local file paths.
+                      Keys are original URLs, values are local file paths.
+                      If None, empty dict is used.
+            section_class: CSS class name for images in the current section.
+                          Used for targeted styling in CSS/PDF generation.
+                          Defaults to 'section-content' if None.
+            **kwargs: Additional arguments passed to parent MarkdownConverter.
+                     Common options include heading_style, bullets, etc.
+
+        Example:
+            >>> image_map = {
+            ...     "https://remote.com/img1.jpg": "local/img1.jpg",
+            ...     "https://remote.com/img2.png": "local/img2.png"
+            ... }
+            >>> converter = GuideMarkdownConverter(
+            ...     image_map=image_map,
+            ...     section_class="section-hardware",
+            ...     heading_style="ATX"
+            ... )
         """
         super().__init__(**kwargs)
         self.image_map = image_map or {}
@@ -62,17 +262,38 @@ class GuideMarkdownConverter(MarkdownConverter):
 
     def convert_img(
         self, el: Tag, text: str = "", convert_as_inline: bool = False, **kwargs
-    ) -> str:
-        """Convert img tag to HTML img element with section class.
+        ) -> str:
+        """Convert img tag to HTML img element with section class and scaling.
 
-        Outputs HTML <img> tags with CSS class based on the section,
-        allowing targeted styling in CSS/PDF generation.
+        This method overrides the default image conversion to:
+        1. Substitute remote URLs with local paths from image_map
+        2. Apply configurable scaling to width/height attributes
+        3. Add section-based CSS class for targeted styling
+        4. Output HTML img tags instead of Markdown image syntax
+
+        The scaling uses the global IMAGE_SCALE setting from configuration,
+        allowing consistent image sizing across the generated guide.
 
         Args:
-            el: The img element.
-            text: Text content (usually empty for images).
-            convert_as_inline: Whether to convert as inline element.
-            **kwargs: Additional arguments passed by markdownify.
+            el: BeautifulSoup Tag representing the img element.
+            text: Text content (usually empty for img tags).
+            convert_as_inline: Whether to convert as inline element
+                               (not typically used for images).
+            **kwargs: Additional arguments passed by markdownify framework.
+
+        Returns:
+            HTML img tag string with src, alt, title, dimensions, and CSS class.
+            The tag preserves all original attributes while adding the section
+            class and applying scaling.
+
+        Example:
+            >>> # Given el is <img src="remote.jpg" width="100" alt="Test">
+            >>> converter = GuideMarkdownConverter(
+            ...     image_map={"remote.jpg": "local.jpg"},
+            ...     section_class="section-demo"
+            ... )
+            >>> result = converter.convert_img(el)
+            # Returns: '<img src="local.jpg" alt="Test" width="100" class="section-demo">'
         """
         src = el.get("src", "")
         alt = el.get("alt", "")
@@ -112,21 +333,43 @@ class GuideMarkdownConverter(MarkdownConverter):
 
         return f"<img src=\"{src}\"{alt_attr}{title_attr}{width_attr}{height_attr}{class_attr}>"
 
-
 def html_to_markdown(
     html: str | Tag,
     image_map: dict[str, str] | None = None,
     section_class: str | None = None,
-) -> str:
-    """Convert HTML to Markdown using custom converter.
+    ) -> str:
+    """Convert HTML content to Markdown using custom converter with image processing.
+
+    This function provides a high-level interface for HTML-to-Markdown conversion
+    with specialized handling for images and content sections. It uses the
+    GuideMarkdownConverter to ensure consistent formatting across the guide.
+
+    The conversion process:
+    1. Initialize custom converter with image mapping and section class
+    2. Convert HTML to Markdown with ATX headings and dash bullets
+    3. Clean up excessive whitespace (3+ newlines to 2 newlines)
+    4. Fix spacing around Markdown links for proper rendering
+    5. Return cleaned, properly formatted Markdown
 
     Args:
-        html: HTML string or BeautifulSoup Tag.
-        image_map: Optional dict mapping remote URLs to local paths.
-        section_class: CSS class name for images in this section.
+        html: HTML content to convert. Can be either a string containing HTML
+              or a BeautifulSoup Tag object.
+        image_map: Optional dictionary mapping remote URLs to local image paths.
+                  Used for offline access and optimized loading.
+        section_class: Optional CSS class name for images in this section.
+                      Used for targeted styling in PDF generation.
 
     Returns:
-        Markdown formatted string with HTML img tags.
+        Cleaned Markdown string with HTML img tags (not Markdown image syntax)
+        and proper spacing around links.
+
+    Example:
+        >>> html = '<h2>Section</h2><p>Text with <img src="img.jpg"> image</p>'
+        >>> image_map = {"img.jpg": "local/img.jpg"}
+        >>> markdown = html_to_markdown(html, image_map, "section-demo")
+        >>> print(markdown)
+        ## Section
+        Text with <img src="local/img.jpg" class="section-demo"> image
     """
     if isinstance(html, Tag):
         html = str(html)
@@ -155,17 +398,40 @@ def html_to_markdown(
 
     return md.strip()
 
-
 def build_image_map(content: ExtractedContent) -> dict[str, str]:
-    """Build a mapping from remote URLs to local paths.
+    """Build a mapping from remote image URLs to local file paths.
 
-    Prefers enhanced_path over local_path if available.
+    This function creates a dictionary that maps original remote image URLs
+    to their local file paths for offline access and optimized loading. It
+    prioritizes enhanced paths over regular local paths when available.
+
+    The mapping process:
+    1. Iterate through all images in the extracted content
+    2. Extract the src URL from each image
+    3. Prefer enhanced_path if available, otherwise use local_path
+    4. Convert Windows backslashes to forward slashes for Markdown compatibility
+    5. Build dictionary mapping src -> local_path
 
     Args:
-        content: Extracted content with images.
+        content: ExtractedContent object containing images list with metadata.
+                Each image should have 'src' and either 'enhanced_path' or
+                'local_path' keys.
 
     Returns:
-        Dict mapping remote src URLs to local paths.
+        Dictionary mapping remote src URLs to local file paths. Empty dict
+        if no images with valid paths are found.
+
+    Example:
+        >>> content = ExtractedContent(
+        ...     images=[
+        ...         {"src": "https://example.com/img1.jpg", "local_path": "img1.jpg"},
+        ...         {"src": "https://example.com/img2.png", "enhanced_path": "enhanced/img2.png"}
+        ...     ]
+        ... )
+        >>> image_map = build_image_map(content)
+        >>> image_map
+        {'https://example.com/img1.jpg': 'img1.jpg',
+         'https://example.com/img2.png': 'enhanced/img2.png'}
     """
     image_map = {}
     for image in content.images:
@@ -182,15 +448,44 @@ def build_image_map(content: ExtractedContent) -> dict[str, str]:
 
     return image_map
 
-
 def generate_table_of_contents(markdown: str) -> str:
-    """Generate a table of contents from all header 2 entries in the markdown.
+    """Generate and insert a table of contents from header 2 entries.
+
+    This function scans the markdown content for all level 2 headers (##)
+    and creates a clickable table of contents that gets inserted after the
+    main title (first level 1 header). The TOC provides navigation for
+    longer guides and improves document structure.
+
+    The generation process:
+    1. Clean markdown from invisible characters for consistency
+    2. Find all ## headers using regex
+    3. Generate anchor links by converting headers to lowercase hyphenated format
+    4. Create TOC in Markdown list format
+    5. Insert TOC after the first # header
 
     Args:
-        markdown: The markdown content to process.
+        markdown: The markdown content to process. Should contain at least one
+                  level 1 header for proper insertion.
 
     Returns:
-        Markdown content with table of contents added after the title.
+        Markdown content with table of contents added. If no ## headers are
+        found, returns the original markdown unchanged.
+
+    Example:
+        >>> markdown = "# Main Title\n\n## Section 1\n\nContent\n\n## Section 2\nContent"
+        >>> result = generate_table_of_contents(markdown)
+        >>> print(result)
+        # Main Title
+
+        ## Inhoudsopgave
+        - [Section 1](#section-1)
+        - [Section 2](#section-2)
+
+        ## Section 1
+        Content
+
+        ## Section 2
+        Content
     """
     # Clean markdown from invisible characters first to ensure consistency
     cleaned_markdown = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]', '', markdown)
@@ -218,15 +513,50 @@ def generate_table_of_contents(markdown: str) -> str:
 
     return markdown
 
-
 def post_process_markdown(markdown: str) -> str:
-    """Apply post-processing fixes to the generated markdown.
+    """Apply comprehensive post-processing fixes and optimizations to markdown.
+
+    This function performs extensive cleanup and normalization of the generated
+    markdown to ensure consistent formatting, proper structure, and optimal
+    rendering. It handles content filtering, header normalization, image scaling,
+    and table of contents generation.
+
+    Processing stages:
+    1. **Character Cleanup**: Remove invisible Unicode characters and control chars
+    2. **Content Filtering**: Remove unwanted sections like "Invoering" paragraphs
+    3. **Header Normalization**: Convert specific headers to level 2 for consistency
+    4. **Chapter Removal**: Remove entire sections (Lesvoorbereiding, Demonstratie, etc.)
+    5. **Image Scaling**: Scale first non-QR image in Programmering section to 50%
+    6. **TOC Generation**: Add table of contents with all header 2 entries
+    7. **URL Updates**: Fix specific URLs (e.g., elecfreaks.com domain changes)
 
     Args:
-        markdown: The markdown content to process.
+        markdown: The raw markdown content to process, typically from
+                 html_to_markdown conversion.
 
     Returns:
-        The processed markdown content.
+        Processed markdown content with:
+        - Clean, readable formatting
+        - Consistent header structure
+        - Removed unwanted content
+        - Properly scaled images
+        - Generated table of contents
+        - Fixed hyperlinks
+
+    Note:
+        Some title word fixes (Geval->Project, etc.) are handled in translator.py
+        via TITLE_WORD_FIXES and _apply_title_fixes() to maintain separation of concerns.
+
+    Example:
+        >>> raw_md = "# Title\n\n> Invoering\n\n### Stap 1\nContent"
+        >>> processed = post_process_markdown(raw_md)
+        >>> print(processed)
+        # Title
+
+        ## Inhoudsopgave
+
+        ## Programmering
+        Content
     """
     # Remove all invisible characters comprehensively
     # Control characters (0x00-0x1F, 0x7F-0x9F) except common whitespace (\t, \n, \r)
@@ -273,7 +603,6 @@ def post_process_markdown(markdown: str) -> str:
         # Match any header line (## to ######)
         header_match = re.match(r'^(#{2,6})\s+(.+)$', line.rstrip())
         if header_match:
-            hashes = header_match.group(1)
             header_text = header_match.group(2)
 
             # Clean header text: remove anchor links like [](#id "title") and strip
@@ -369,25 +698,75 @@ def post_process_markdown(markdown: str) -> str:
 
     return markdown
 
-
 def generate_guide(
     content: ExtractedContent, output_dir: Path | None = None, add_qrcodes: bool = True
     ) -> str:
-    """Generate a Markdown guide from extracted content.
+    """Generate a complete Markdown guide from extracted content.
 
-    Uses local image paths if available (from downloader/enhancer).
-    Optionally adds QR codes for all hyperlinks in the guide.
+    This is the main function that orchestrates the entire guide generation
+    process. It converts structured extracted content into a well-formatted
+    Markdown document with proper organization, image handling, and optional
+    QR code generation for hyperlinks.
+
+    The generation process:
+    1. Build image mapping for local path substitution
+    2. Create document structure with title and metadata
+    3. Process each section with appropriate CSS classes
+    4. Convert HTML content to Markdown with image processing
+    5. Apply comprehensive post-processing and cleanup
+    6. Optionally generate QR codes for all hyperlinks
+    7. Return final formatted guide
 
     Args:
-        content: Structured content from extraction.
-        output_dir: Output directory for QR codes (required if add_qrcodes is True).
-        add_qrcodes: Whether to generate QR codes for hyperlinks (default: True).
+        content: ExtractedContent object containing the structured content
+                with title, sections, images, and metadata.
+        output_dir: Output directory for QR code generation. Required if
+                   add_qrcodes is True, otherwise optional.
+        add_qrcodes: Whether to generate QR codes for hyperlinks in the guide.
+                    Defaults to True for enhanced accessibility.
 
     Returns:
-        Markdown formatted guide string.
+        Complete Markdown guide string ready for saving or further processing.
+        The guide includes proper formatting, table of contents, processed
+        images, and optionally QR codes.
 
     Raises:
-        GenerationError: If guide generation fails.
+        GenerationError: If guide generation fails due to content processing
+                        errors, missing output directory for QR codes, or
+                        other processing issues.
+
+    Example:
+        >>> from pathlib import Path
+        >>> from src.sources.base import ExtractedContent
+        >>>
+        >>> content = ExtractedContent(
+        ...     title="My Arduino Project",
+        ...     sections=[
+        ...         {
+        ...             "heading": "Hardware Setup",
+        ...             "level": 2,
+        ...             "content": [BeautifulSoup("<p>Connect the LED</p>", "html.parser")]
+        ...         }
+        ...     ],
+        ...     images=[],
+        ...     metadata={"description": "A beginner Arduino project"}
+        ... )
+        >>>
+        >>> guide = generate_guide(
+        ...     content=content,
+        ...     output_dir=Path("output"),
+        ...     add_qrcodes=True
+        ... )
+        >>> print(guide[:100])  # First 100 characters
+        # My Arduino Project
+
+        > A beginner Arduino project
+
+        ## Inhoudsopgave
+        - [Hardware Setup](#hardware-setup)
+
+        ## Hardware Setup
+        Connect the LED
     """
     logger.debug(f" * {inspect.currentframe().f_code.co_name} > Generating guide: {content.title}")
 
@@ -467,19 +846,45 @@ def generate_guide(
         logger.error(f"Generation failed: {e} | Context: {error_context}")
         raise GenerationError(f"Failed to generate guide: {e}") from e
 
-
 def save_guide(guide: str, output_path: Path) -> Path:
-    """Save a guide to a file.
+    """Save a generated guide to file with proper error handling.
+
+    This function handles the file I/O operations for saving generated guides,
+    ensuring that directories are created as needed and providing detailed
+    error context if saving fails. It uses UTF-8 encoding to support
+    international characters and special symbols.
+
+    The saving process:
+    1. Ensure parent directory exists (create if needed)
+    2. Write guide content to file using UTF-8 encoding
+    3. Log successful save operation
+    4. Return the final output path for confirmation
 
     Args:
-        guide: Markdown content to save.
-        output_path: Path to save the guide to.
+        guide: The complete Markdown guide content to save.
+                Should be a string generated by generate_guide().
+        output_path: Path where the guide should be saved. Can include
+                    subdirectories which will be created automatically.
 
     Returns:
-        The path where the guide was saved.
+        Path object where the guide was actually saved. This matches the
+        input output_path but ensures the operation completed successfully.
 
     Raises:
-        GenerationError: If saving fails.
+        GenerationError: If saving fails due to permission issues, disk space,
+                        invalid path, or other I/O errors.
+
+    Example:
+        >>> from pathlib import Path
+        >>> guide_content = "# My Guide\n\nThis is my guide content."
+        >>> output_path = Path("output/guides/my_guide.md")
+        >>>
+        >>> try:
+        ...     saved_path = save_guide(guide_content, output_path)
+        ...     print(f"Guide saved to: {saved_path}")
+        ... except GenerationError as e:
+        ...     print(f"Failed to save guide: {e}")
+        Guide saved to: output/guides/my_guide.md
     """
     logger.debug(f" * {inspect.currentframe().f_code.co_name} > Saving to: {output_path}")
 
@@ -500,3 +905,143 @@ def save_guide(guide: str, output_path: Path) -> Path:
         }
         logger.error(f"Save failed: {e} | Context: {error_context}")
         raise GenerationError(f"Failed to save guide: {e}") from e
+
+
+def _create_sample_content() -> ExtractedContent:
+    """Create sample ExtractedContent for demonstration purposes.
+
+    Returns:
+        ExtractedContent with sample sections, images, and metadata.
+    """
+    from bs4 import BeautifulSoup
+
+    # Create sample HTML content
+    sample_html = """
+    <p>This is a sample CoderDojo project guide.</p>
+    <img src="https://example.com/circuit.jpg" alt="Circuit diagram" width="400">
+    <h3>Components Needed</h3>
+    <ul>
+        <li>Arduino Uno</li>
+        <li>LED</li>
+        <li>220Ω resistor</li>
+        <li>Breadboard</li>
+    </ul>
+    <p>Visit <a href="https://www.arduino.cc">Arduino website</a> for more info.</p>
+    """
+
+    # Parse HTML into BeautifulSoup objects
+    soup = BeautifulSoup(sample_html, 'html.parser')
+    content_elements = list(soup.children)
+
+    return ExtractedContent(
+        title="Sample Arduino LED Project",
+        sections=[
+            {
+                "heading": "Hardware Setup",
+                "level": 2,
+                "content": content_elements
+            },
+            {
+                "heading": "Programming",
+                "level": 2,
+                "content": [BeautifulSoup("<p>Upload the following code to your Arduino:</p>", "html.parser")]
+            }
+        ],
+        images=[
+            {
+                "src": "https://example.com/circuit.jpg",
+                "local_path": "images/circuit.jpg",
+                "alt": "Circuit diagram",
+                "width": "400"
+            }
+        ],
+        metadata={
+            "description": "A beginner-friendly Arduino project with LED",
+            "language": "en",
+            "difficulty": "beginner"
+        }
+    )
+
+
+def main():
+    """Main function for running the generator with sample data.
+
+    This function demonstrates the usage of the generator module with
+    hardcoded sample parameters. It creates a sample guide, processes it,
+    and saves it to the output directory.
+
+    Usage:
+        python -m src.generator
+
+    The function will:
+    1. Create sample ExtractedContent
+    2. Generate a Markdown guide with QR codes
+    3. Save the guide to output/sample_guide.md
+    4. Print success message with file location
+    """
+    import logging
+    from pathlib import Path
+
+    # Configure logging for demo
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(levelname)s: %(message)s'
+    )
+
+    print("🚀 Starting CoderDojo Guide Generator Demo")
+    print("=" * 50)
+
+    try:
+        # Create sample content
+        print("📝 Creating sample content...")
+        content = _create_sample_content()
+        print(f"   ✓ Title: {content.title}")
+        print(f"   ✓ Sections: {len(content.sections)}")
+        print(f"   ✓ Images: {len(content.images)}")
+
+        # Set up output directory
+        output_dir = Path("output")
+        output_dir.mkdir(exist_ok=True)
+
+        # Generate guide with QR codes
+        print("\n🔄 Generating Markdown guide...")
+        guide = generate_guide(
+            content=content,
+            output_dir=output_dir,
+            add_qrcodes=True
+        )
+        print(f"   ✓ Generated {len(guide)} characters")
+
+        # Save guide
+        output_path = output_dir / "sample_guide.md"
+        print(f"\n💾 Saving guide to {output_path}...")
+        saved_path = save_guide(guide, output_path)
+        print(f"   ✓ Saved to: {saved_path}")
+
+        # Show preview
+        print("\n📋 Guide Preview:")
+        print("-" * 30)
+        lines = guide.split('\n')
+        for i, line in enumerate(lines[:10]):  # Show first 10 lines
+            print(f"{i+1:2d}: {line}")
+        if len(lines) > 10:
+            print(f"... ({len(lines) - 10} more lines)")
+
+        print("\n✅ Demo completed successfully!")
+        print(f"📁 Check the output directory: {output_dir.absolute()}")
+
+    except Exception as e:
+        print(f"\n❌ Demo failed: {e}")
+        print(f"Error type: {type(e).__name__}")
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    """Entry point when running the module directly.
+
+    Allows the generator to be run as:
+        python -m src.generator
+    """
+    exit(main())

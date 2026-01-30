@@ -8,7 +8,6 @@ import inspect
 import logging
 import re
 import sys
-from io import BytesIO
 from pathlib import Path
 
 from markdown import markdown
