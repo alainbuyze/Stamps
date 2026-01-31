@@ -74,45 +74,68 @@ def parse_guide_for_catalog(md_path: Path) -> ProjectSummary | None:
 
     title = title_match.group(1).strip()
 
-    # Extract introduction section (## Introductie or ## Introduction)
-    # Look for content between Introductie heading and any other header (level 2 or 3)
-    intro_pattern = r"##\s+(?:Introductie|Introduction):?\s*(?:\u200B|\u200C|\u200D)?\s*\n(.*?)(?=\n#{2,3}\s+|\Z)"
-    intro_match = re.search(intro_pattern, content, re.DOTALL | re.IGNORECASE)
-
+    # Extract introduction section by scanning line by line
+    # Start capturing when we find a header2 with 'Introductie' or 'Doel'
+    # Stop capturing when we encounter any header (level 1, 2, or 3)
     introduction = ""
-    if intro_match:
-        intro_content = intro_match.group(1).strip()
-        # Extract text, skipping images, hyperlinks, img tags and empty lines
-        intro_lines = []
-        for line in intro_content.split("\n"):
-            line = line.strip()
-            # Skip image lines, empty lines, and lines with only images/img tags
-            if line and not line.startswith("![") and not line.startswith("<img"):
+    lines = content.split('\n')
+    capturing = False
+    intro_lines = []
+    main_image = None
+
+    for line in lines:
+        stripped_line = line.strip()
+
+        # Check if this is a header
+        if stripped_line.startswith('#'):
+            # Check if this is the start of an introduction section
+            if (stripped_line.startswith('## ') and
+                ('introductie' in stripped_line.lower() or 'doel' in stripped_line.lower())):
+                capturing = True
+                continue  # Skip the header line itself
+            # If we're capturing and encounter any header, stop
+            elif capturing:
+                break
+            # Otherwise continue scanning
+
+        # If we're in capturing mode, process the line
+        if capturing and stripped_line and stripped_line != "---":
+            # Extract first image from introduction section
+            if not main_image:
+                # Check for markdown images ![alt](path)
+                if stripped_line.startswith("!["):
+                    image_match = re.search(r"!\[([^\]]*)\]\(([^)]+)\)", stripped_line)
+                    if image_match:
+                        image_path = image_match.group(2)
+                        # Store image path as-is for markdown formatting in catalog
+                        main_image = image_path
+                # Check for HTML img tags <img src="path" ...>
+                elif stripped_line.startswith("<img"):
+                    img_match = re.search(r'<img[^>]*src=["\']([^"\']+)["\']', stripped_line, re.IGNORECASE)
+                    if img_match:
+                        image_path = img_match.group(1)
+                        # Store image path as-is for markdown formatting in catalog
+                        main_image = image_path
+
+            # Skip image lines and lines with only images/img tags
+            if not stripped_line.startswith("![") and not stripped_line.startswith("<img"):
                 # Remove markdown hyperlinks [text](url) -> text
-                line = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', line)
+                cleaned_line = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', stripped_line)
                 # Remove HTML img tags
-                line = re.sub(r'<img[^>]*>', '', line)
+                cleaned_line = re.sub(r'<img[^>]*>', '', cleaned_line)
                 # Remove any remaining HTML-like tags
-                line = re.sub(r'<[^>]*>', '', line)
-                if line:  # Only add if line still has content after cleanup
-                    intro_lines.append(line)
+                cleaned_line = re.sub(r'<[^>]*>', '', cleaned_line)
+                # Remove any remaining markdown formatting
+                cleaned_line = re.sub(r'[*_`]', '', cleaned_line)
+
+                if cleaned_line:  # Only add if line still has content after cleanup
+                    intro_lines.append(cleaned_line)
+
+    if intro_lines:
         introduction = " ".join(intro_lines)
         # Limit length for catalog display
         if len(introduction) > 500:
             introduction = introduction[:497] + "..."
-
-    # Extract first image from introduction section
-    intro_section_pattern = r"##\s+(?:Introductie|Introduction):?\s*(?:\u200B|\u200C|\u200D)?\s*\n(.*?)(?=\n#{2,3}\s+|\Z)"
-    intro_section_match = re.search(intro_section_pattern, content, re.DOTALL | re.IGNORECASE)
-
-    main_image = None
-    if intro_section_match:
-        intro_section = intro_section_match.group(1)
-        image_match = re.search(r"!\[([^\]]*)\]\(([^)]+)\)", intro_section)
-        if image_match:
-            image_path = image_match.group(2)
-            # Store image path as-is for markdown formatting in catalog
-            main_image = image_path
 
     # If no main image found, search for image with class="section-resultaat"
     if not main_image:
@@ -227,7 +250,7 @@ def generate_catalog(
             # If the image path doesn't include the guide subdirectory, add it
             if not image_path.startswith(guide_name):
                 image_path = f"{guide_name}/{image_path}"
-            parts.append(f"\n![{summary.title}]({image_path})\n")
+            parts.append(f'\n<img src="{image_path}" alt="{summary.title}" class="section-header">\n')
 
         # Introduction
         if summary.introduction:
@@ -252,7 +275,7 @@ def generate_catalog(
 if __name__ == "__main__":
     import sys
     # Default input directory
-    default_input = r"D:\Coderdojo\Projects"
+    default_input = r"D:\Coderdojo\32 IN 1 Wonder Building Kit(EF08239)"
     # Use command line argument or default
     input_dir = sys.argv[1] if len(sys.argv) > 1 else default_input
     try:

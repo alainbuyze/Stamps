@@ -580,6 +580,35 @@ def post_process_markdown(markdown: str) -> str:
     new_url = "https://shop.elecfreaks.com/products/elecfreaks-micro-bit-nezha-48-in-1-inventors-kit-without-micro-bit-board"
     markdown = markdown.replace(old_url, new_url)
 
+    # Clean all headers by removing inline markdown and anchor links
+    # This handles patterns like " [#](#purpose "Permalink to this headline")" and similar
+    lines = markdown.split('\n')
+    for i, line in enumerate(lines):
+        # Match any header line (# to ######)
+        header_match = re.match(r'^(#{1,6})\s+(.+)$', line.rstrip())
+        if header_match:
+            header_level = header_match.group(1)
+            header_text = header_match.group(2)
+
+            # Remove anchor links and other inline markdown from headers
+            # Pattern 1: [#](#id "title") - common permalink format
+            header_text = re.sub(r'\s*\[\s*#\s*\]\(\s*#[^)]*\s+"[^"]*"\s*\)\s*', '', header_text)
+            # Pattern 2: [#](#id) - simple anchor links
+            header_text = re.sub(r'\s*\[\s*#\s*\]\(\s*#[^)]*\s*\)\s*', '', header_text)
+            # Pattern 3: [text](#id) - any anchor link
+            header_text = re.sub(r'\s*\[[^\]]*\]\(\s*#[^)]*\s*\)\s*', '', header_text)
+            # Pattern 4: Remove any remaining brackets that might be empty
+            header_text = re.sub(r'\s*\[\s*\]\s*', '', header_text)
+            # Pattern 5: Remove numbering like "3." or "3.1." from headers
+            header_text = re.sub(r'^\d+(?:\.\d+)*\.?\s*', '', header_text)
+            # Pattern 6: Remove trailing whitespace
+            header_text = header_text.strip()
+
+            # Reconstruct the clean header
+            lines[i] = f'{header_level} {header_text}'
+
+    markdown = '\n'.join(lines)
+
     # Headers to normalize to level 2, removing any trailing content
     headers_to_convert = {
         'Programmering',
