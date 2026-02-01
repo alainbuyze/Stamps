@@ -11,6 +11,7 @@ Features:
 - Translate content to Dutch
 - Generate QR codes for hyperlinks
 - Create printable PDF versions with optimized layouts
+- Generate catalog documents from multiple guides
 - Batch processing with resume capability
 - Re-process guides using existing images (skip download/enhance)
 - Progress tracking and detailed logging
@@ -18,115 +19,65 @@ Features:
 Supported Sources:
 - wiki.elecfreaks.com - Elecfreaks Wiki tutorials
 
+Commands:
+    generate    Generate a guide from a single tutorial URL
+    batch       Generate guides from all tutorials on an index page
+    catalog     Generate a catalog document from all project guides
+    print       Convert a markdown guide to printable PDF
+    print-all   Convert all markdown files in a directory to PDFs
+    sources     List supported source websites
+
 Basic Usage:
-    # Generate a guide from a single tutorial
-    uv run python -m src.cli generate --url "https://wiki.elecfreaks.com/en/microbit/..."
-
-    # Process all tutorials from an index page
-    uv run python -m src.cli batch --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/"
-
-    # Convert a markdown guide to PDF
-    uv run python -m src.cli print --input output/tutorial.md
-
-Examples:
-    # Basic single tutorial processing
-    uv run python -m src.cli generate `
-        --url "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/case-01/" `
-        --output ./guides
-
-    # Single tutorial with all features enabled (default behavior)
-    uv run python -m src.cli generate `
-        --url "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/Nezha_Inventor_s_kit_for_microbit_case_69" `
-        --output ./guides `
-        --verbose
-
-    # Single tutorial skipping optional features
-    uv run python -m src.cli generate `
-        --url "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/case-03/" `
-        --output ./guides `
-        --no-enhance `
-        --no-translate `
-        --no-qrcode `
-        --no-makecode
-
-    # Re-process tutorial using existing downloaded/enhanced images
-    uv run python -m src.cli generate `
-        --url "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/Nezha_Inventor_s_kit_for_microbit_case_01/" `
-        --output "D:/Coderdojo/Projects" `
-        --no-download
-
-    # List all tutorials on an index page
-no-enhance
-
-    # Batch process all tutorials with resume capability
-    uv run python -m src.cli batch `
-        --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" `
-        --output ./guides `
-        --verbose
-
-    # Resume interrupted batch processing
-    uv run python -m src.cli batch `
-        --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" `
-        --output ./guides `
-        --resume `
-        --verbose
-
-    # Batch processing with disabled features for faster processing
-    uv run python -m src.cli batch `
-        --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" `
-        --output ./guides `
-        --no-enhance `
-        --no-translate `
-        --no-qrcode
-
-    # Re-process batch using existing downloaded/enhanced images
-    uv run python -m src.cli batch `
-        --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" `
-        --output ./guides `
-        --no-download
-
-    # Convert markdown guide to PDF with default settings
-    uv run python -m src.cli print `
-        --input ./guides/case-01.md
-
-    # Convert to PDF with custom output path
-    uv run python -m src.cli print `
-        --input ./guides/case-01.md `
-        --output ./printable/case-01-tutorial.pdf
-
-    # Convert to PDF with custom CSS styling
-    uv run python -m src.cli print `
-        --input ./guides/case-01.md `
-        --css ./custom-print-styles.css
-
-    # Convert all markdown files in a directory to PDFs
-    uv run python -m src.cli print-all --input ./guides
-
-    # Convert all markdown files to specific output directory
-    uv run python -m src.cli print-all -i ./guides -o ./pdfs
-
-    # Convert all markdown files with custom CSS styling
-    uv run python -m src.cli print-all --input ./guides --css ./custom-print-styles.css
-
-    # Show supported sources
+    uv run python -m src.cli generate --url "<URL>"
+    uv run python -m src.cli batch --index "<URL>"
+    uv run python -m src.cli catalog --input ./output
+    uv run python -m src.cli print --input ./output/guide.md
+    uv run python -m src.cli print-all --input ./output
     uv run python -m src.cli sources
 
-Output Structure:
-    Single tutorial:
-    <output>/
-        <guide-name>.md              # Generated markdown guide
-        <guide-name>/
-            images/                  # Downloaded and enhanced images
-            qrcodes/                 # QR codes for hyperlinks (if enabled)
+Command Options:
+    +---------------+--------+------------------------------------------+---------------------------+------------------+
+    | Option        | Short  | Description                              | Default                   | Commands         |
+    +---------------+--------+------------------------------------------+---------------------------+------------------+
+    | --url         |        | Tutorial page URL (required)             | -                         | generate         |
+    | --index       |        | Index page URL with tutorial links (req) | -                         | batch            |
+    | --input       | -i     | Input file or directory (required)       | -                         | print, print-all,|
+    |               |        |                                          |                           | catalog          |
+    | --output      | -o     | Output directory or file path            | OUTPUT_ROOT_DIR config    | all except       |
+    |               |        |                                          |                           | sources          |
+    | --title       | -t     | Title for catalog document               | "Project Catalogus"       | catalog          |
+    | --css         |        | Custom CSS file for PDF styling          | resources/print.css       | print, print-all |
+    | --verbose     | -v     | Enable verbose/debug output              | False                     | all except       |
+    |               |        |                                          |                           | sources          |
+    | --list-only   |        | List tutorials without processing        | False                     | batch            |
+    | --resume      |        | Resume from previous batch state         | False                     | batch            |
+    | --no-enhance  |        | Skip Upscayl image enhancement           | False                     | generate, batch  |
+    | --no-translate|        | Skip Dutch translation                   | False                     | generate, batch  |
+    | --no-qrcode   |        | Skip QR code generation for hyperlinks   | False                     | generate, batch  |
+    | --no-makecode |        | Skip MakeCode screenshot replacement     | False                     | generate, batch  |
+    | --no-download |        | Use existing images (skip download)      | False                     | generate, batch  |
+    +---------------+--------+------------------------------------------+---------------------------+------------------+
 
-    Batch processing:
-    <output>/
-        guide-1.md
-        guide-1/images/
-        guide-2.md
-        guide-2/images/
-        ...
-        .batch_state.json           # Resume state (auto-cleaned on success)
+Output Structure:
+    Single tutorial (generate):
+        <output>/
+            <guide-name>.md              # Generated markdown guide
+            <guide-name>/
+                images/                  # Downloaded and enhanced images
+                qrcodes/                 # QR codes for hyperlinks (if enabled)
+
+    Batch processing (batch):
+        <output>/
+            guide-1.md
+            guide-1/images/
+            guide-2.md
+            guide-2/images/
+            ...
+            .batch_state.json           # Resume state (auto-cleaned on success)
+
+    Catalog (catalog):
+        <output>/
+            catalog.md                  # Catalog with TOC and project summaries
 
 Pipeline Stages:
     1. Fetch: Download HTML content from the tutorial URL
