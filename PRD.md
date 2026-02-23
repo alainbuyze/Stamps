@@ -1,537 +1,490 @@
-# CoderDojo Guide Generator - Product Requirements Document
+# Stamp Collection Toolset — Product Requirements Document
+
+**Version:** 1.0
+**Date:** 2026-02-22
+**Author:** Generated via PRD Discovery Process
+
+---
 
 ## 1. Executive Summary
 
-The CoderDojo Guide Generator is a Python-based tool designed to help CoderDojo volunteers create printable, Dutch-language instruction guides from online educational resources. Many maker kits (like the Elecfreaks Nezha Inventor's Kit) provide instructions only in English and only online, making them difficult for Dutch-speaking children to follow during hands-on sessions.
+The Stamp Collection Toolset is a Python-based CLI application designed to help a philatelist manage a 6,000+ stamp collection focused on space exploration themes. The toolset addresses three core challenges: building a searchable AI-enhanced database of space-themed stamps from Colnect, identifying physical stamps via camera using computer vision and semantic search, and migrating an existing collection from LASTDODO to Colnect.
 
-This tool automates the process of downloading web-based tutorials, extracting relevant content, enhancing low-quality images, translating text to Dutch, and generating clean, printable Markdown documents. It supports both single-guide generation and batch processing of entire kit collections.
+The solution leverages modern AI capabilities (Groq vision API for image descriptions, OpenAI for embeddings, YOLOv8 for object detection) combined with a vector database (Supabase) for similarity search. Browser automation via Playwright enables seamless integration with Colnect for collection management without requiring an API.
 
-**MVP Goal:** Create a working pipeline that can process Elecfreaks wiki pages into high-quality Dutch Markdown guides with enhanced images, ready for printing.
+This is a single-user tool built for a technically proficient user comfortable with Python and CLI interfaces. The architecture prioritizes low cost (targeting free/minimal tiers), simplicity (Colnect as the source of truth), and practicality (one-time setup with occasional re-runs).
 
-## 2. Mission
+---
 
-**Mission Statement:** Empower CoderDojo volunteers to easily create accessible, high-quality printed instruction materials in Dutch for children's maker projects.
+## 2. Glossary
+
+| Term | Definition |
+|------|------------|
+| **Colnect** | Online stamp catalog and collector community — primary collection management system |
+| **LASTDODO** | Dutch collectibles marketplace — source for one-time collection import |
+| **RAG** | Retrieval-Augmented Generation — local index for stamp identification via similarity search |
+| **MNH** | Mint Never Hinged — stamp with original gum, never mounted |
+| **Used** | Stamp that has been postally used (cancelled) |
+| **CTO** | Cancelled To Order — stamp cancelled without postal use (often for collectors) |
+| **CDP** | Chrome DevTools Protocol — allows programmatic control of a running Chrome browser |
+| **YOLOv8** | Latest YOLO object detection model by Ultralytics |
+| **Groq** | AI inference platform optimized for speed, offers vision models |
+| **Label Studio** | Open-source data labeling tool for ML training datasets |
+| **pgvector** | PostgreSQL extension for vector similarity search |
+
+---
+
+## 3. Mission
+
+**Mission Statement:** Enable rapid identification of physical stamps through AI-powered image recognition and maintain a consolidated digital collection in Colnect.
 
 **Core Principles:**
-1. **Accessibility First** - Remove barriers by providing Dutch instructions in printable format
-2. **Quality Enhancement** - Improve source material quality (especially images) rather than just copying
-3. **Batch Efficiency** - Process entire kit collections with minimal manual intervention
-4. **Maintainability** - Clean, modular code that volunteers can extend for new kit sources
-5. **Offline-Ready** - Generated guides work completely offline once printed
+- **Simplicity over features** — Colnect remains the source of truth; the toolset is a companion, not a replacement
+- **Low cost** — Leverage free tiers and minimal API usage; total ongoing cost < €1/month
+- **Practical automation** — Automate repetitive tasks while keeping the user in control of decisions
+- **Resilience** — Long-running operations support checkpoint/resume; errors don't cause data loss
 
-## 3. Target Users
+---
 
-**Primary User: CoderDojo Volunteer/Mentor**
-- Technical comfort: Comfortable running Python scripts from command line
-- Needs: Quick way to prepare printed materials for sessions
-- Pain points: Manually translating and formatting guides is time-consuming; online-only instructions don't work well in classroom settings
+## 4. Target Users
 
-**Secondary User: CoderDojo Organizer**
-- Technical comfort: Basic computer skills
-- Needs: Library of pre-generated guides for multiple kits
-- Pain points: Inconsistent quality of available materials; language barrier for Dutch children
+**Primary Persona:** Technical stamp collector (single user)
 
-## 4. MVP Scope
+- **Technical Level:** High — comfortable with Python, CLI, configuration files, AI concepts
+- **Key Needs:**
+  - Quickly identify unknown stamps by pointing a camera
+  - Have a comprehensive searchable index of space-themed stamps
+  - Migrate existing LASTDODO collection to Colnect
+- **Pain Points:**
+  - Manual catalog lookup is time-consuming
+  - Collection split across platforms (LASTDODO, Colnect)
+  - No unified search across physical and digital inventory
 
-### In Scope
+---
 
-**Core Functionality:**
-- ✅ Download single tutorial page from URL
-- ✅ Download all tutorials from an index page (batch mode)
-- ✅ Extract main content, removing navigation/sidebars/footers
-- ✅ Download all images from tutorial
-- ✅ Enhance images using Upscayl
-- ✅ Translate text content to Dutch
-- ✅ Generate clean Markdown output
-- ✅ Organize output in structured folders
+## 5. MVP Scope (MoSCoW)
 
-**Technical:**
-- ✅ Playwright for page rendering (handles JavaScript)
-- ✅ BeautifulSoup for HTML parsing
-- ✅ Upscayl integration for image enhancement
-- ✅ Command-line interface
-- ✅ Progress reporting during batch operations
-- ✅ Resume capability for interrupted batch jobs
+### Must Have (MVP Critical)
 
-**Supported Sources:**
-- ✅ Elecfreaks Wiki (wiki.elecfreaks.com)
+| ID | Feature |
+|----|---------|
+| M1 | Colnect scraper for space themes |
+| M2 | Groq vision API integration for stamp descriptions |
+| M3 | OpenAI embeddings for semantic search |
+| M4 | Supabase RAG index (insert/search) |
+| M5 | CLI camera capture |
+| M6 | YOLO stamp detection (pre-trained model) |
+| M7 | RAG-based identification with threshold (>90% auto, else top 3) |
+| M8 | LASTDODO collection scraper |
+| M9 | Catalog number matching (Michel, Yvert, Scott, SG, Fisher) |
+| M10 | Condition mapping (Postfris→MNH, Gestempeld→Used) |
+| M11 | Browser automation for Colnect (add to collection) |
+| M12 | Dry-run mode for import |
+| M13 | Configuration file support (.env) |
+| M14 | Detailed logging throughout |
+| M15 | CLI-based manual review for unmatched stamps |
 
-### Out of Scope
+### Should Have (High Priority)
 
-- ❌ GUI interface
-- ❌ PDF generation (use Markdown viewer/printer instead)
-- ❌ Real-time translation API (use local/free translation)
-- ❌ Support for other kit manufacturers (future phase)
-- ❌ Automatic printing
-- ❌ Cloud deployment
-- ❌ Multi-language support beyond Dutch
+| ID | Feature |
+|----|---------|
+| S1 | Checkpoint/resume for long scrapes |
+| S2 | Partial re-ingestion by country/year |
+| S3 | Description regeneration capability |
+| S4 | Multi-stamp batch processing in camera mode |
+| S5 | Configurable error handling behavior |
+| S6 | Rate limiting configuration |
+| S7 | Import summary report |
 
-## 5. User Stories
+### Could Have (If Time Permits)
 
-1. **As a CoderDojo volunteer**, I want to generate a Dutch guide from a single tutorial URL, so that I can quickly prepare materials for a specific project session.
-   - *Example:* `python guide_gen.py --url "https://wiki.elecfreaks.com/.../case_01" --output ./guides`
+| ID | Feature |
+|----|---------|
+| C1 | Web UI for manual review queue |
+| C2 | YOLO training pipeline with Label Studio |
+| C3 | Colnect "already owned" detection |
+| C4 | Progress bar / ETA for long operations |
+| C5 | Multiple LLaVA prompt templates |
+| C6 | Statistics dashboard |
 
-2. **As a CoderDojo volunteer**, I want to batch-process all tutorials from a kit index page, so that I can prepare a complete set of materials at once.
-   - *Example:* `python guide_gen.py --index "https://wiki.elecfreaks.com/.../nezha-inventors-kit/" --output ./guides`
+### Won't Have (This Version)
 
-3. **As a CoderDojo volunteer**, I want images to be automatically enhanced, so that printed guides have clear, readable diagrams without manual editing.
-   - *Example:* Low-resolution assembly images are upscaled to 2x/4x resolution
+| ID | Feature |
+|----|---------|
+| W1 | Bidirectional LASTDODO sync |
+| W2 | Local full catalog database |
+| W3 | Mobile app / tablet interface |
+| W4 | Multi-user support |
+| W5 | Stamp valuation / pricing features |
+| W6 | Social features / sharing |
+| W7 | OCR for text extraction (Groq vision handles) |
 
-4. **As a CoderDojo volunteer**, I want to resume an interrupted batch job, so that I don't have to restart from scratch if something fails.
-   - *Example:* `python guide_gen.py --resume --output ./guides`
+---
 
-5. **As a CoderDojo organizer**, I want guides organized in a consistent folder structure, so that I can easily find and distribute materials.
-   - *Example:* Output organized as `guides/nezha-kit/case_01_mechanical_shrimp/guide.md`
+## 6. User Stories
 
-6. **As a CoderDojo volunteer**, I want a preview of detected tutorials before batch processing, so that I can verify the correct pages will be processed.
-   - *Example:* `python guide_gen.py --index "..." --list-only`
+### Use Case 1: Initialization (RAG Database Building)
 
-## 6. Core Architecture & Patterns
+#### Story 1.1: Scrape Colnect Space-Themed Stamps
 
-### High-Level Architecture
+**As a** collector, **I want to** scrape stamp data from Colnect for configurable themes (Space, Astronomy, Scientists, etc.), **so that** I have a comprehensive source dataset for identification.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        CLI Interface                             │
-│                    (guide_gen.py / click)                        │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Pipeline Orchestrator                       │
-│                   (coordinates all stages)                       │
-└─────────────────────────────────────────────────────────────────┘
-        │              │              │              │
-        ▼              ▼              ▼              ▼
-┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐
-│  Scraper  │  │ Extractor │  │  Enhancer │  │ Generator │
-│(Playwright)│  │(Beautiful │  │ (Upscayl) │  │(Markdown) │
-│           │  │   Soup)   │  │           │  │           │
-└───────────┘  └───────────┘  └───────────┘  └───────────┘
-                                    │
-                                    ▼
-                            ┌───────────┐
-                            │Translator │
-                            │ (Dutch)   │
-                            └───────────┘
-```
+**Acceptance Criteria:**
+- [ ] Given a list of theme keywords, when scraping is initiated, then all stamps matching those themes are discovered
+- [ ] Given rate limiting is set to "polite", when scraping runs, then requests are spaced 1-2 seconds apart
+- [ ] Given a stamp page is loaded, then the following data is extracted: Colnect ID, title, country, year, image URL, themes, catalog codes, and page URL
+- [ ] Given scraping encounters an error, when configured to "skip and log", then the stamp is logged for retry and scraping continues
+- [ ] Given scraping is interrupted, when resumed, then it continues from where it left off (checkpoint support)
 
-### Directory Structure
+#### Story 1.2: Generate Stamp Descriptions
 
-```
-coderdojo/
-├── src/
-│   ├── __init__.py
-│   ├── cli.py              # Command-line interface
-│   ├── pipeline.py         # Orchestrates the full workflow
-│   ├── scraper.py          # Playwright-based page fetcher
-│   ├── extractor.py        # BeautifulSoup content extraction
-│   ├── enhancer.py         # Upscayl image processing
-│   ├── translator.py       # Dutch translation
-│   ├── generator.py        # Markdown generation
-│   └── sources/
-│       ├── __init__.py
-│       ├── base.py         # Base source adapter
-│       └── elecfreaks.py   # Elecfreaks-specific extraction rules
-├── tests/
-│   ├── __init__.py
-│   ├── test_scraper.py
-│   ├── test_extractor.py
-│   ├── test_enhancer.py
-│   └── fixtures/           # Sample HTML for testing
-├── output/                 # Generated guides (gitignored)
-├── cache/                  # Downloaded pages cache (gitignored)
-├── pyproject.toml
-├── CLAUDE.md
-└── PRD.md
-```
+**As a** collector, **I want to** generate AI descriptions for each stamp image using Groq vision API, **so that** I have rich text for semantic search in the RAG.
 
-### Key Design Patterns
+**Acceptance Criteria:**
+- [ ] Given a stamp image URL, when Groq processes it, then a description is generated including: visual elements, country name, denomination, year (if visible), colors, and depicted subject
+- [ ] Given Groq processing fails, then the stamp is flagged and processing continues
+- [ ] Given a stamp already has a description, when regeneration is requested, then the old description is replaced
+- [ ] Given the prompt template is modified in `config/llava_prompt.txt`, then subsequent descriptions use the new prompt
 
-1. **Pipeline Pattern** - Each stage (scrape → extract → enhance → translate → generate) is independent and composable
-2. **Adapter Pattern** - Source-specific extraction rules (`sources/elecfreaks.py`) implement a common interface
-3. **Strategy Pattern** - Translation and enhancement can swap implementations
-4. **Repository Pattern** - Cache manager handles downloaded content persistence
+#### Story 1.3: Build RAG Index in Supabase
 
-## 7. Tools/Features
+**As a** collector, **I want to** store stamp descriptions with vector embeddings in Supabase, **so that** I can perform similarity searches for identification.
 
-### 7.1 Page Scraper (Playwright)
+**Acceptance Criteria:**
+- [ ] Given a stamp with description, when indexed, then the following is stored: Colnect ID, description text, embedding vector, country, year, image URL, Colnect URL
+- [ ] Given a stamp already exists in RAG, when re-indexed, then the existing entry is updated (upsert)
+- [ ] Given embedding generation fails, then the error is logged and the stamp is flagged
 
-**Purpose:** Download fully-rendered web pages including JavaScript content
+#### Story 1.4: Partial Re-ingestion
 
-**Operations:**
-- `fetch_page(url)` - Download and render a single page
-- `fetch_index(url)` - Extract all tutorial links from index page
-- `download_images(page, output_dir)` - Download all images from page
+**As a** collector, **I want to** re-scrape and re-index stamps filtered by country and/or year, **so that** I can update specific portions of the database without full re-processing.
 
-**Key Features:**
-- Headless browser operation
-- Automatic wait for content rendering
-- Image URL extraction and download
-- Rate limiting to avoid blocking
+**Acceptance Criteria:**
+- [ ] Given filter `--country=Australia`, when re-ingestion runs, then only Australian stamps are processed
+- [ ] Given filter `--year=2021`, when re-ingestion runs, then only stamps from 2021 are processed
+- [ ] Given both filters, when combined, then they are applied with AND logic
 
-### 7.2 Content Extractor (BeautifulSoup)
+---
 
-**Purpose:** Extract relevant tutorial content, removing navigation clutter
+### Use Case 2: Stamp Detection & Identification
 
-**Operations:**
-- `extract_content(html)` - Get main article content
-- `extract_metadata(html)` - Get title, description
-- `extract_images(html)` - Get image references with context
-- `clean_html(element)` - Remove unwanted attributes/elements
+#### Story 2.1: Capture Image via Camera
 
-**Elecfreaks-Specific Rules:**
-- Main content: `article` or `.markdown` container
-- Remove: `.sidebar`, `.navbar`, `.footer`, `.breadcrumb`, `.toc`
-- Images: All `img` tags within main content
-- Code blocks: Preserve MakeCode/Python snippets
+**As a** collector, **I want to** capture a single frame from my PC camera via CLI, **so that** I can identify stamps in the image.
 
-### 7.3 Image Enhancer (Upscayl)
+**Acceptance Criteria:**
+- [ ] Given the CLI command is executed, when a camera is available, then a single frame is captured
+- [ ] Given multiple cameras are available, when no camera is specified, then the default camera is used (configurable)
+- [ ] Given no camera is available, then a clear error message is shown
+- [ ] Given capture succeeds, then the image is held in memory (not saved to disk)
 
-**Purpose:** Upscale low-quality images for better print quality
+#### Story 2.2: Detect Stamps in Image (YOLO)
 
-**Operations:**
-- `enhance_image(input_path, output_path)` - Upscale single image
-- `enhance_batch(input_dir, output_dir)` - Process all images in folder
+**As a** collector, **I want to** automatically detect all stamp boundaries in a captured image, **so that** individual stamps can be extracted for identification.
 
-**Configuration:**
-- Upscayl path: `C:\Program Files\Upscayl\Upscayl.exe`
-- Scale factor: 2x (configurable)
-- Model: Real-ESRGAN (default)
-- Skip if image already high-resolution (>1000px)
+**Acceptance Criteria:**
+- [ ] Given an image with one or more stamps, when YOLO processes it, then bounding boxes are returned for each detected stamp
+- [ ] Given an image with no stamps, then an empty result is returned with a message
+- [ ] Given multiple stamps detected, then all are processed automatically
 
-### 7.4 Translator
+#### Story 2.3: Identify Stamp via RAG Search
 
-**Purpose:** Translate English content to Dutch
+**As a** collector, **I want to** match a detected stamp against the RAG database using its description, **so that** I know which catalog entry it corresponds to.
 
-**Operations:**
-- `translate_text(text, source='en', target='nl')` - Translate string
-- `translate_markdown(md_content)` - Translate preserving formatting
+**Acceptance Criteria:**
+- [ ] Given a cropped stamp image, when Groq generates a description, then a vector similarity search is performed against Supabase
+- [ ] Given similarity score > 90%, then the match is auto-accepted and displayed
+- [ ] Given similarity score ≤ 90%, then top 3 matches are displayed with scores for user selection
+- [ ] Given no matches above minimum threshold (50%), then "no match found" is displayed with option to search manually
 
-**Implementation Options (in order of preference):**
-1. **Deep Translator** (free, uses Google Translate API)
-2. **Argos Translate** (offline, open source)
-3. **Manual glossary** for technical terms
+#### Story 2.4: Add Identified Stamp to Colnect Collection
 
-### 7.5 Markdown Generator
+**As a** collector, **I want to** automatically add a confirmed stamp to my Colnect collection via browser automation, **so that** I don't have to manually navigate and click.
 
-**Purpose:** Generate clean, printable Markdown output
+**Acceptance Criteria:**
+- [ ] Given a confirmed match with Colnect URL, when "add to collection" is triggered, then Playwright opens the page and performs the add action
+- [ ] Given user is not logged into Colnect, then a prompt appears to log in first
+- [ ] Given addition succeeds, then confirmation is displayed
+- [ ] Given addition fails, then the error is displayed with the Colnect URL for manual action
 
-**Operations:**
-- `generate_guide(content, images, metadata)` - Create full guide
-- `format_steps(steps)` - Format assembly/coding steps
-- `embed_images(images, style)` - Reference images with captions
+---
 
-**Output Format:**
-```markdown
-# [Project Title in Dutch]
+### Use Case 3: LASTDODO Migration
 
-## Materialen
-[Components list with images]
+#### Story 3.1: Scrape LASTDODO Collection
 
-## Montage
-[Step-by-step assembly with numbered images]
+**As a** collector, **I want to** extract all stamps from my LASTDODO collection via web scraping, **so that** I have a dataset to import into Colnect.
 
-## Aansluitschema
-[Connection diagram]
+**Acceptance Criteria:**
+- [ ] Given logged-in LASTDODO session, when scraping runs, then all 6,143 items are extracted
+- [ ] Given each item, then the following is captured: title, catalog numbers (Michel, Yvert, Scott, SG, Fisher), country, year, condition, quantity, image URL
+- [ ] Given pagination exists, then all pages are processed
+- [ ] Given scraping encounters rate limiting, then polite delays are applied
 
-## Programmeren
-[MakeCode/Python instructions]
 
-## Resultaat
-[Expected outcome with demo image/GIF]
-```
+#### Story 3.2: Match LASTDODO Stamps to Colnect
+
+**As a** collector, **I want to** match LASTDODO stamps to Colnect entries by catalog number, **so that** I can link my existing collection to the new platform.
+
+**Acceptance Criteria:**
+- [ ] Given a stamp with catalog number, when matched against Colnect, then the Colnect entry is identified
+- [ ] Given matching priority: Michel → Yvert → Scott → SG → Fisher, when first match found, then it is used
+- [ ] Given no catalog number match, then the stamp is flagged for manual review with image and metadata
+
+#### Story 3.3: Map Conditions and Quantities
+
+**As a** collector, **I want to** consolidate multiple condition variants of the same stamp into a single Colnect entry with breakdown in comments, **so that** my collection accurately reflects what I own.
+
+**Acceptance Criteria:**
+- [ ] Given stamps with Postfris or Ongebruikt condition, then Colnect condition is set to MNH
+- [ ] Given stamps with Gestempeld condition, then Colnect condition is set to Used
+- [ ] Given both MNH and Used variants exist for the same stamp, then MNH takes precedence for the condition field
+- [ ] Given multiple variants, then comment field contains breakdown (e.g., `MNH:3, U:1`)
+- [ ] Given multiple variants, then quantity field contains total count
+
+#### Story 3.4: Import to Colnect via Browser Automation
+
+**As a** collector, **I want to** add matched stamps to my Colnect collection via browser automation, **so that** the migration is automated.
+
+**Acceptance Criteria:**
+- [ ] Given matched stamp data, when import runs in live mode, then Playwright adds the stamp to Colnect with correct condition, quantity, and comment
+- [ ] Given dry-run mode is enabled, then all steps are logged but no Colnect updates occur
+- [ ] Given import of a stamp fails, then the error is logged and import continues with next stamp
+- [ ] Given import completes, then a summary report shows: successful imports, failures, items pending manual review
+
+#### Story 3.5: Manual Review Queue
+
+**As a** collector, **I want to** manually review unmatched stamps and provide Colnect IDs, **so that** the migration is complete.
+
+**Acceptance Criteria:**
+- [ ] Given items flagged for review, when review command runs, then items are displayed one at a time with metadata
+- [ ] Given user provides Colnect URL or ID, then the match is recorded and item can be imported
+- [ ] Given user chooses to skip, then item is marked as skipped
+
+---
+
+## 7. Data Model
+
+### Entities
+
+#### CatalogStamp (Local SQLite)
+
+Minimal stamp data scraped from Colnect for RAG ingestion.
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| colnect_id | string | Yes | Unique Colnect identifier |
+| colnect_url | string | Yes | Full URL to stamp page |
+| title | string | Yes | Stamp title/name |
+| country | string | Yes | Issuing country |
+| year | integer | Yes | Year of issue |
+| themes | JSON | No | Theme tags for filtering |
+| image_url | string | Yes | Direct URL to stamp image on Colnect |
+| catalog_codes | JSON | No | `{michel, scott, yvert, sg, fisher}` |
+| scraped_at | datetime | Yes | When scraped |
+
+#### RAGEntry (Supabase)
+
+Searchable entry for stamp identification.
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| id | uuid | Yes | Supabase primary key |
+| colnect_id | string | Yes | Unique Colnect identifier |
+| colnect_url | string | Yes | Link to stamp page |
+| image_url | string | Yes | Direct link to stamp image |
+| description | text | Yes | Groq-generated description |
+| embedding | vector(1536) | Yes | OpenAI text-embedding-3-small |
+| country | string | Yes | Filter attribute |
+| year | integer | Yes | Filter attribute |
+| created_at | datetime | Yes | When indexed |
+| updated_at | datetime | Yes | Last update |
+
+#### LastdodoItem (Local SQLite)
+
+Stamp from LASTDODO collection with catalog identifiers.
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| lastdodo_id | string | Yes | Unique LASTDODO identifier |
+| title | string | Yes | Item title |
+| country | string | No | Country if extractable |
+| year | integer | No | Year if extractable |
+| michel_number | string | No | Michel catalog number |
+| yvert_number | string | No | Yvert et Tellier number |
+| scott_number | string | No | Scott catalog number |
+| sg_number | string | No | Stanley Gibbons number |
+| fisher_number | string | No | Fisher catalog number |
+| condition | string | Yes | Dutch: Postfris, Gestempeld, Ongebruikt |
+| condition_mapped | string | Yes | English: MNH, Used |
+| quantity | integer | Yes | Number owned |
+| value_eur | decimal | No | Catalog value |
+| image_url | string | No | LASTDODO image URL |
+| scraped_at | datetime | Yes | When scraped |
+
+#### ImportTask (Local SQLite)
+
+Tracks migration of LASTDODO item to Colnect.
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| id | uuid | Yes | Task identifier |
+| lastdodo_id | string | Yes | Source item |
+| colnect_id | string | No | Matched Colnect stamp |
+| status | enum | Yes | pending, matched, needs_review, imported, failed, skipped |
+| match_method | string | No | Which catalog matched: michel, yvert, scott, sg, fisher, manual |
+| condition_final | string | No | MNH or Used |
+| quantity_final | integer | No | Total quantity |
+| comment | string | No | Breakdown: `MNH:3, U:1` |
+| error_message | string | No | Error if failed |
+| reviewed_at | datetime | No | Manual review timestamp |
+| imported_at | datetime | No | Import timestamp |
+| dry_run | boolean | Yes | Dry run flag |
+
+### Validation Rules
+
+- `colnect_id` must be unique across CatalogStamp and RAGEntry
+- `lastdodo_id` must be unique in LastdodoItem
+- `condition_mapped` must be one of: MNH, Used
+- `status` in ImportTask must be one of: pending, matched, needs_review, imported, failed, skipped
+- `embedding` must be exactly 1536 dimensions
+
+---
 
 ## 8. Technology Stack
 
-### Backend (Python 3.11+)
+| Component | Technology | Version | Cost | Notes |
+|-----------|------------|---------|------|-------|
+| Runtime | Python | ≥3.11 | Free | Type hints, match statements |
+| Package Manager | UV | Latest | Free | Per technical guide |
+| CLI Framework | Click | ^8.0 | Free | Per technical guide |
+| Console Output | Rich | ^13.0 | Free | Progress, tables |
+| Configuration | Pydantic Settings | ^2.0 | Free | Type-safe config |
+| Local Database | SQLite | Built-in | Free | No dependencies |
+| Vector Database | Supabase | Free tier | Free | 500MB limit |
+| Embeddings | OpenAI API | text-embedding-3-small | ~€0.50 | Batch on ingest |
+| Vision API | Groq | llama-3.2-11b-vision | ~€5-15 | Configurable model |
+| Object Detection | Ultralytics YOLOv8 | ^8.0 | Free | Auto-download |
+| Web Scraping | Playwright | ^1.40 | Free | Dynamic pages |
+| HTML Parsing | BeautifulSoup4 | ^4.12 | Free | Robust parsing |
+| HTTP Client | httpx | ^0.27 | Free | Async support |
+| Image Processing | Pillow | ^10.0 | Free | PNG conversion |
+| Camera Capture | OpenCV | ^4.8 | Free | Camera access |
+| Groq Client | groq | ^0.5 | Free | Official SDK |
 
-| Component | Package | Version | Purpose |
-|-----------|---------|---------|---------|
-| CLI | click | ^8.1 | Command-line interface |
-| Browser automation | playwright | ^1.40 | Page rendering & scraping |
-| HTML parsing | beautifulsoup4 | ^4.12 | Content extraction |
-| HTTP client | httpx | ^0.26 | Image downloads |
-| Translation | deep-translator | ^1.11 | English to Dutch |
-| Markdown | markdownify | ^0.11 | HTML to Markdown conversion |
-| Progress | rich | ^13.7 | Progress bars & formatting |
-| Config | pydantic | ^2.5 | Settings validation |
+---
 
-### External Tools
+## 9. Non-Functional Requirements
 
-| Tool | Path | Purpose |
-|------|------|---------|
-| Upscayl | `C:\Program Files\Upscayl\Upscayl.exe` | Image enhancement |
+| Category | Requirement | Target | Priority |
+|----------|-------------|--------|----------|
+| Performance | RAG search response | < 2s | Must |
+| Performance | YOLO detection | < 1s | Must |
+| Performance | Groq vision | < 3s per image | Should |
+| Performance | Full identification | < 15s per stamp | Should |
+| Reliability | Checkpoint/resume | Required | Must |
+| Reliability | Graceful errors | No data loss | Must |
+| Maintainability | Logging | Detailed, configurable | Must |
+| Maintainability | Configuration | Externalized in .env | Must |
+| Scalability | RAG size | ~50,000 stamps | Must |
+| Compatibility | OS | Windows 10/11 | Must |
+| Compatibility | Python | 3.11+ | Must |
+| Security | API keys | .env.keys, gitignored | Must |
+| Cost | Supabase | Free tier (<500MB) | Must |
+| Cost | Monthly ongoing | < €1/month | Must |
 
-### Development Tools
+---
 
-| Tool | Purpose |
-|------|---------|
-| uv | Package management |
-| pytest | Testing |
-| ruff | Linting & formatting |
+## 10. Cost Estimate
 
-## 9. Security & Configuration
+### By Scenario
 
-### Configuration (Environment Variables)
+| Scenario | One-Time Cost | Monthly Cost | Notes |
+|----------|---------------|--------------|-------|
+| Initial Setup | ~€6-16 | €0 | Groq + OpenAI for 50K stamps |
+| Ongoing Use | €0 | ~€0.01-0.05 | Occasional identification |
 
-```bash
-# .env.example
-UPSCAYL_PATH="C:\Program Files\Upscayl\Upscayl.exe"
-OUTPUT_DIR="./output"
-CACHE_DIR="./cache"
-IMAGE_SCALE_FACTOR=2
-RATE_LIMIT_SECONDS=2
-```
+### Cost Breakdown
 
-### Configuration (config.toml alternative)
+| Category | Service | One-Time | Monthly | Required |
+|----------|---------|----------|---------|----------|
+| Vision | Groq API | ~€5-15 | ~€0.01 | Yes |
+| Embeddings | OpenAI | ~€0.50 | Negligible | Yes |
+| Database | Supabase | Free | Free | Yes |
+| Detection | YOLOv8 | Free | Free | Yes |
+| **Total** | | **~€6-16** | **< €0.05** | |
 
-```toml
-[paths]
-upscayl = "C:\\Program Files\\Upscayl\\Upscayl.exe"
-output = "./output"
-cache = "./cache"
+---
 
-[scraping]
-rate_limit_seconds = 2
-timeout_seconds = 30
-headless = true
+## 11. Implementation Phases
 
-[enhancement]
-scale_factor = 2
-min_size_to_skip = 1000
-model = "realesrgan-x4plus"
+### Phase 1: Core Infrastructure (4-6 hours)
+- Project structure, configuration, database, CLI skeleton, `init` command
 
-[translation]
-source_language = "en"
-target_language = "nl"
-```
+### Phase 2: Colnect Scraping (6-8 hours)
+- Browser manager, Colnect scraper, `scrape colnect` command
 
-### Security Scope
+### Phase 3: RAG Pipeline (6-8 hours)
+- Groq describer, OpenAI embeddings, Supabase client, indexer, searcher
 
-**In Scope:**
-- ✅ Respect rate limits to avoid IP blocking
-- ✅ Cache downloaded content to minimize requests
-- ✅ Validate URLs before processing
+### Phase 4: Stamp Detection & Identification (6-8 hours)
+- Camera capture, YOLO detector, identifier, results display
 
-**Out of Scope:**
-- ❌ Authentication (target sites are public)
-- ❌ User data handling
-- ❌ Network security beyond HTTPS
+### Phase 5: Colnect Browser Automation (4-6 hours)
+- CDP session, Colnect actions, integration with identification
 
-## 10. CLI Specification
+### Phase 6: LASTDODO Migration (8-10 hours)
+- LASTDODO scraper, matcher, mapper, importer, review CLI
 
-### Commands
+### Phase 7: Polish & Documentation (4-6 hours)
+- README, CLAUDE.md, help text, edge case testing
 
-```bash
-# Single guide generation
-python -m coderdojo.cli generate --url <URL> [--output <DIR>] [--no-enhance] [--no-translate]
+**Total estimated effort:** 38-52 hours
 
-# Batch generation from index
-python -m coderdojo.cli batch --index <URL> [--output <DIR>] [--list-only] [--resume]
+**Priority:** Phases 1-5 first (identification capability), Phase 6 can be deferred
 
-# List supported sources
-python -m coderdojo.cli sources
+---
 
-# Clear cache
-python -m coderdojo.cli cache clear
-```
-
-### Options
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--url` | Single tutorial URL | Required for `generate` |
-| `--index` | Index page URL with multiple tutorials | Required for `batch` |
-| `--output`, `-o` | Output directory | `./output` |
-| `--no-enhance` | Skip image enhancement | False |
-| `--no-translate` | Keep English (skip translation) | False |
-| `--list-only` | Show detected tutorials without processing | False |
-| `--resume` | Continue interrupted batch job | False |
-| `--verbose`, `-v` | Verbose output | False |
-
-### Example Usage
-
-```bash
-# Generate single guide
-python -m coderdojo.cli generate \
-  --url "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/Nezha_Inventor_s_kit_for_microbit_case_01" \
-  --output ./guides
-
-# Generate all 76 Nezha kit guides
-python -m coderdojo.cli batch \
-  --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" \
-  --output ./guides
-
-# Preview what would be processed
-python -m coderdojo.cli batch \
-  --index "https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/" \
-  --list-only
-```
-
-## 11. Success Criteria
-
-### MVP Success Definition
-
-The MVP is successful when a CoderDojo volunteer can:
-1. Run a single command to generate a Dutch guide from an Elecfreaks URL
-2. Get a printable Markdown file with enhanced images
-3. Process an entire kit (76 guides) overnight with resume capability
-
-### Functional Requirements
-
-- ✅ Successfully scrape Elecfreaks wiki pages
-- ✅ Extract main content without navigation clutter
-- ✅ Download all images from tutorials
-- ✅ Enhance images using Upscayl (2x minimum)
-- ✅ Translate all text to Dutch
-- ✅ Generate valid Markdown output
-- ✅ Batch process with progress indication
-- ✅ Resume interrupted batch jobs
-
-### Quality Indicators
-
-- Image enhancement completes without errors for >95% of images
-- Translation preserves technical terms correctly
-- Generated Markdown renders correctly in standard viewers
-- Batch processing handles rate limits without IP blocking
-
-### User Experience Goals
-
-- Clear progress indication during long batch operations
-- Helpful error messages when something fails
-- Generated guides are immediately printable
-
-## 12. Implementation Phases
-
-### Phase 1: Foundation
-
-**Goal:** Basic scraping and content extraction working
-
-**Deliverables:**
-- ✅ Project structure and dependencies
-- ✅ Playwright-based page scraper
-- ✅ BeautifulSoup content extractor for Elecfreaks
-- ✅ Basic CLI with `generate` command
-- ✅ Raw Markdown output (no enhancement/translation)
-
-**Validation:**
-- Can download and extract content from Case 01
-- Output contains all text and image references
-- No navigation/sidebar content in output
-
-### Phase 2: Enhancement Pipeline
-
-**Goal:** Image enhancement and translation working
-
-**Deliverables:**
-- ✅ Upscayl integration for image enhancement
-- ✅ Image download and organization
-- ✅ Dutch translation integration
-- ✅ Enhanced Markdown output with embedded images
-
-**Validation:**
-- Images are visibly improved in quality
-- Dutch translation is readable and accurate
-- Guide is print-ready
-
-### Phase 3: Batch Processing
-
-**Goal:** Process entire kit collections efficiently
-
-**Deliverables:**
-- ✅ Index page parsing for tutorial links
-- ✅ Batch command with progress reporting
-- ✅ Resume capability for interrupted jobs
-- ✅ Rate limiting and caching
-
-**Validation:**
-- Can process all 76 Nezha kit guides
-- Resume works after interruption
-- No IP blocking during batch operations
-
-### Phase 4: Polish & Documentation
-
-**Goal:** Production-ready tool with documentation
-
-**Deliverables:**
-- ✅ Error handling and edge cases
-- ✅ User documentation (README)
-- ✅ Sample output guides
-- ✅ Technical term glossary for translation
-
-**Validation:**
-- Tool runs reliably for all supported pages
-- Documentation sufficient for other volunteers
-- Generated guides used successfully in CoderDojo session
-
-## 13. Future Considerations
-
-### Post-MVP Enhancements
-
-- **Additional Sources:** Support for other kit manufacturers (Keyestudio, DFRobot, etc.)
-- **PDF Export:** Direct PDF generation with proper styling
-- **GUI Interface:** Simple web-based UI for non-technical users
-- **Multiple Languages:** Support for French, German, etc.
-- **Custom Templates:** Allow customizing output format/styling
-
-### Integration Opportunities
-
-- **GitHub Actions:** Automated guide generation when source pages update
-- **CoderDojo Portal:** Integration with CoderDojo resource sharing platform
-- **Print Services:** Direct integration with print-on-demand services
-
-### Advanced Features
-
-- **OCR Enhancement:** Extract text from diagram images
-- **Video Tutorials:** Extract frames from linked videos
-- **Diff Detection:** Alert when source pages change
-
-## 14. Risks & Mitigations
+## 12. Risks & Mitigations
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| **Website structure changes** | High - breaks extraction | Medium | Modular source adapters; test suite with fixtures |
-| **IP blocking during batch** | Medium - interrupts processing | Medium | Rate limiting; caching; resume capability |
-| **Upscayl CLI limitations** | Medium - manual workaround needed | Low | Research CLI options; fallback to GUI automation |
-| **Translation quality** | Medium - confusing instructions | Medium | Technical term glossary; manual review option |
-| **Large batch processing time** | Low - inconvenience | High | Progress reporting; background/overnight runs |
+| Colnect page structure changes | High | Medium | Modular selectors, easy to update |
+| LASTDODO page structure changes | Medium | Low | One-time migration, less critical |
+| Supabase free tier exceeded | High | Low | Monitor usage, ~350MB expected |
+| Groq API rate limits | Medium | Medium | Implement backoff, respect 30/min |
+| YOLOv8 poor stamp detection | Medium | Medium | Could Have: custom training |
+| RAG match quality insufficient | Medium | Medium | Tune prompt, try 90b model |
+| Chrome CDP issues | Medium | Low | Clear error messages, setup docs |
 
-## 15. Appendix
+---
 
-### Related Resources
+## 13. Appendix
 
-- [Elecfreaks Nezha Kit Wiki](https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/)
-- [Upscayl GitHub](https://github.com/upscayl/upscayl)
-- [Upscayl-NCNN CLI](https://github.com/upscayl/upscayl-ncnn)
-- [Playwright Python Docs](https://playwright.dev/python/)
-- [BeautifulSoup Docs](https://www.crummy.com/software/BeautifulSoup/bs4/doc/)
+### Default Themes
 
-### Sample Page Analysis: Case 01 (Mechanical Shrimp)
+```
+Space, Space Traveling, Astronomy, Rockets, Satellites, Scientists
+```
 
-**Content Structure:**
-- 1 Introduction section
-- 1 Materials/components list
-- 33 Assembly step images
-- 1 Connection diagram
-- 6 MakeCode programming screenshots
-- 1 Result GIF
+### Condition Mapping
 
-**Image Hosting:**
-- CDN: `wiki-media-ef.oss-cn-hongkong.aliyuncs.com`
-- Format: PNG (photos), GIF (animations)
+| LASTDODO (Dutch) | Colnect (English) |
+|------------------|-------------------|
+| Postfris | MNH |
+| Ongebruikt | MNH |
+| Gestempeld | Used |
 
-### Technical Terms Glossary (EN → NL)
+### Chrome CDP Startup
 
-| English | Dutch |
-|---------|-------|
-| micro:bit | micro:bit |
-| servo | servomotor |
-| motor | motor |
-| sensor | sensor |
-| LED | LED |
-| connection diagram | aansluitschema |
-| assembly | montage |
-| components | onderdelen |
-| step | stap |
-| result | resultaat |
+```powershell
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
+```
+
+### Key Dependencies
+
+- [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
+- [Playwright Python](https://playwright.dev/python/)
+- [Supabase Python](https://github.com/supabase-community/supabase-py)
+- [Groq Python](https://github.com/groq/groq-python)
+- [OpenAI Python](https://github.com/openai/openai-python)

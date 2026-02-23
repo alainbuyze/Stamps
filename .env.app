@@ -1,40 +1,70 @@
-# CoderDojo Guide Generator Configuration
+# Stamp Collection Toolset - Application Defaults
+# Copy to .env.keys for secrets, .env.local for user overrides
 
-# Output settings (subdirectories within OUTPUT_ROOT_DIR)
-OUTPUT_DIR="Projects"
-CACHE_DIR="cache"
-LOG_DIR="logs"
+# =============================================================================
+# Database
+# =============================================================================
+DATABASE_PATH=data/stamps.db
 
-# Scraping settings
-RATE_LIMIT_SECONDS=2
+# =============================================================================
+# Scraping Settings
+# =============================================================================
+SCRAPE_DELAY_SECONDS=1.5
+SCRAPE_RETRY_COUNT=3
+SCRAPE_RETRY_DELAY=5.0
+SCRAPE_RETRY_BACKOFF=2.0
+SCRAPE_ERROR_BEHAVIOR=skip
+
+# Browser settings
 BROWSER_HEADLESS=true
-BROWSER_TIMEOUT=90000
+BROWSER_TIMEOUT=60000
 
-# Logging
-LOG_LEVEL="INFO"
-LOG_FORMAT="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# =============================================================================
+# RAG Settings
+# =============================================================================
+RAG_MATCH_AUTO_THRESHOLD=0.9
+RAG_MATCH_MIN_THRESHOLD=0.5
+EMBEDDING_MODEL=text-embedding-3-small
 
-# Image settings
-IMAGE_DOWNLOAD_TIMEOUT=60
-IMAGE_OUTPUT_DIR="images"
-IMAGE_SCALE=1.1
+# =============================================================================
+# Vision Settings (Groq)
+# =============================================================================
+GROQ_MODEL=llama-3.2-11b-vision-preview
+GROQ_RATE_LIMIT_PER_MINUTE=30
+VISION_PROMPT_PATH=config/llava_prompt.txt
 
-# Enhancement settings (Upscayl)
-UPSCAYL_PATH="C:\Program Files\Upscayl\resources\bin\upscayl-bin.exe"
-UPSCAYL_SCALE=4
-UPSCAYL_MODEL="upscayl-standard-4x"
-ENHANCE_IMAGES=true
+# =============================================================================
+# Object Detection (YOLO)
+# =============================================================================
+YOLO_MODEL_PATH=models/yolov8n.pt
+YOLO_CONFIDENCE_THRESHOLD=0.5
+YOLO_AUTO_DOWNLOAD=true
 
-# GPU settings (for multi-GPU systems)
-# UPSCAYL_GPU_ID=auto      # auto, 0, 1, or "0,1" for multi-GPU
-# UPSCAYL_THREADS=1:2:2    # load:proc:save thread counts
+# =============================================================================
+# Camera Settings
+# =============================================================================
+CAMERA_INDEX=0
 
-# QR Code settings
-QRCODE_SCALE=0.5
+# =============================================================================
+# Browser Automation (CDP)
+# =============================================================================
+CHROME_CDP_URL=http://localhost:9222
 
-# Translation settings
-TRANSLATE_ENABLED=true
-TRANSLATION_SOURCE="en"
-TRANSLATION_TARGET="nl"
-TRANSLATION_PROVIDER=google
+# =============================================================================
+# Default Themes for Colnect Scraping
+# =============================================================================
+DEFAULT_THEMES=Space,Space Traveling,Astronomy,Rockets,Satellites,Scientists
 
+# =============================================================================
+# Logging Settings
+# =============================================================================
+LOG_LEVEL=INFO
+LOG_FORMAT=%(asctime)s - %(name)s - %(levelname)s - %(message)s [%(funcName)s:%(lineno)d]
+LOG_DIR=data/logs
+LOG_MAX_SIZE_MB=2
+LOG_BACKUP_COUNT=5
+
+# =============================================================================
+# Output Settings
+# =============================================================================
+OUTPUT_DIR=data

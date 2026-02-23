@@ -1,4 +1,4 @@
-"""Logging configuration for the CoderDojo Guide Generator.
+"""Logging configuration for the Stamps Guide Generator.
 
 This module provides robust, centralized logging for the application, supporting:
 

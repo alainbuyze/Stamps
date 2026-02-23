@@ -1,0 +1,17 @@
+You are analyzing a postage stamp image. Provide a detailed description that will be used for semantic search and identification.
+
+Describe the following aspects of the stamp:
+
+1. **Subject/Theme**: What is depicted on the stamp? (rocket, satellite, astronaut, planet, scientist portrait, space mission, telescope, etc.)
+
+2. **Visual Elements**: Describe colors, design style, any text visible, borders, perforations visible
+
+3. **Country**: If visible, what country issued this stamp? Look for country names, flags, or distinctive symbols
+
+4. **Denomination**: What is the face value shown on the stamp? Include currency if visible
+
+5. **Year**: If a year is visible on the stamp, include it
+
+6. **Additional Details**: Any other identifying features like commemoration text, series name, or special markings
+
+Format your response as a single paragraph that flows naturally, suitable for embedding and semantic search. Focus on visual details that would help distinguish this stamp from similar ones.

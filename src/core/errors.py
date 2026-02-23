@@ -1,4 +1,4 @@
-"""Custom exceptions for the CoderDojo Guide Generator."""
+"""Custom exceptions for the Stamp Guide Generator."""
 
 
 class ScrapingError(Exception):

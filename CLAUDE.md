@@ -1,272 +1,455 @@
-# CoderDojo Guide Generator
+# Stamp Collection Toolset
 
-A tool to create printable Dutch instruction guides from online maker kit tutorials.
+An AI-powered CLI application to manage a space-themed stamp collection: build a searchable RAG database from Colnect, identify physical stamps via camera, and migrate collections from LASTDODO.
 
 ## Tech Stack
 
 - **Language:** Python 3.11+
-- **Browser Automation:** Playwright
-- **HTML Parsing:** BeautifulSoup4
-- **Translation:** deep-translator
-- **Image Enhancement:** Upscayl (external tool)
+- **Package Manager:** UV
 - **CLI:** Click
-- **Progress/UI:** Rich
-Review default standards in @C:\Users\alain\CascadeProjects\Coderdojo\guides
+- **Console UI:** Rich (progress bars, tables, formatted output)
+- **Configuration:** Pydantic Settings (.env files)
+- **Local Database:** SQLite (built-in)
+- **Vector Database:** Supabase + pgvector
+- **Embeddings:** OpenAI text-embedding-3-small
+- **Vision/Description:** Groq API (llama-3.2-11b-vision, configurable)
+- **Object Detection:** YOLOv8 (Ultralytics)
+- **Web Scraping:** Playwright + BeautifulSoup4
+- **Browser Automation:** Playwright CDP (Chrome DevTools Protocol)
+- **Image Processing:** Pillow, OpenCV
+- **HTTP Client:** httpx
+
+Review technical standards in `@guides\technical_stack.md`
 
 ## Project Structure
 
 ```
 src/
-├── cli.py                  # Command-line interface
-├── pipeline.py             # Orchestrates the full workflow
-├── scraper.py              # Playwright-based page fetcher
-├── extractor.py            # BeautifulSoup content extraction
-├── makecode_detector.py    # Detects MakeCode links and code images
-├── makecode_capture.py     # Captures Dutch MakeCode screenshots
-├── makecode_replacer.py    # Replaces English screenshots with Dutch
-├── downloader.py           # Downloads images
-├── enhancer.py             # Upscayl image processing
-├── translator.py           # Dutch translation
-├── generator.py            # Markdown generation
-├── catalog.py              # Catalog generation from guides
-└── sources/
-    ├── base.py             # Base source adapter
-    └── elecfreaks.py       # Elecfreaks-specific extraction rules
-tests/                      # Test files
-output/                     # Generated guides (gitignored)
-cache/                      # Downloaded pages cache (gitignored)
+├── __init__.py
+├── cli.py                        # Click CLI entry point
+│
+├── core/                         # Shared infrastructure
+│   ├── __init__.py
+│   ├── config.py                 # Pydantic Settings
+│   ├── errors.py                 # Custom exceptions
+│   ├── logging.py                # Rich logging setup
+│   └── database.py               # SQLite connection & operations
+│
+├── scraping/                     # Web scraping module
+│   ├── __init__.py
+│   ├── browser.py                # Playwright browser manager
+│   ├── colnect.py                # Colnect stamp catalog scraper
+│   └── lastdodo.py               # LASTDODO collection scraper
+│
+├── rag/                          # RAG database module
+│   ├── __init__.py
+│   ├── embeddings.py             # OpenAI embedding generation
+│   ├── supabase_client.py        # Supabase connection & operations
+│   ├── indexer.py                # Index stamps into RAG
+│   └── search.py                 # Similarity search
+│
+├── vision/                       # Computer vision module
+│   ├── __init__.py
+│   ├── camera.py                 # OpenCV camera capture
+│   ├── detector.py               # YOLOv8 stamp detection
+│   └── describer.py              # Groq vision API descriptions
+│
+├── identification/               # Stamp identification module
+│   ├── __init__.py
+│   ├── identifier.py             # Pipeline orchestration
+│   └── results.py                # Result display & user selection
+│
+├── migration/                    # LASTDODO → Colnect migration
+│   ├── __init__.py
+│   ├── matcher.py                # Catalog number matching
+│   ├── mapper.py                 # Condition mapping logic
+│   ├── importer.py               # Import orchestration
+│   └── review.py                 # CLI manual review interface
+│
+└── colnect_api/                  # Browser automation for Colnect
+    ├── __init__.py
+    ├── session.py                # CDP session management
+    └── actions.py                # Add to collection, etc.
+
+config/
+└── llava_prompt.txt              # Configurable vision prompt template
+
+models/                           # YOLO weights (gitignored, auto-downloaded)
+data/                             # SQLite DB + logs (gitignored)
+tests/                            # Test files
+guides/                           # Development documentation
 ```
 
 ## Common Commands
 
-**Setup:**
+### Setup
 
-**Windows (PowerShell):**
 ```powershell
-uv sync                           # Install dependencies
-playwright install chromium       # Install browser for scraping
+# Install dependencies
+uv sync
+
+# Install Playwright browser (for scraping)
+playwright install chromium
+
+# Initialize database and verify connections
+uv run stamp-tools init
 ```
 
-**Windows (Command Prompt):**
-```cmd
-uv sync                           # Install dependencies
-playwright install chromium       # Install browser for scraping
-```
+### Scraping
 
-**Linux/macOS:**
-```bash
-uv sync                           # Install dependencies
-playwright install chromium       # Install browser for scraping
-```
-
-**Run:**
-
-**Windows (PowerShell):**
 ```powershell
-# Generate single guide
-uv run python -m src.cli generate --url "<URL>" --output ./output
+# Scrape Colnect for space-themed stamps (uses default themes)
+uv run stamp-tools scrape colnect
 
-# Generate guide without MakeCode replacement
-uv run python -m src.cli generate --url "<URL>" --output ./output --no-makecode
+# Scrape with specific themes
+uv run stamp-tools scrape colnect --themes "Space,Astronomy,Rockets"
 
-# Generate all guides from index
-uv run python -m src.cli batch --index "<URL>" --output ./output
+# Scrape specific country/year (partial re-ingestion)
+uv run stamp-tools scrape colnect --country "Australia" --year 2021
 
-# List tutorials without processing
-uv run python -m src.cli batch --index "<URL>" --list-only
+# Resume interrupted scrape
+uv run stamp-tools scrape colnect --resume
 
-# Generate catalog from existing guides
-uv run python -m src.cli catalog --input ./output
-
-# Generate catalog with custom title
-uv run python -m src.cli catalog --input ./output --title "Nezha Kit Projects"
+# Scrape LASTDODO collection (requires logged-in Chrome session)
+uv run stamp-tools scrape lastdodo
 ```
 
-**Windows (Command Prompt):**
-```cmd
-# Generate single guide
-uv run python -m src.cli generate --url "<URL>" --output ./output
+### RAG Database
 
-# Generate guide without MakeCode replacement
-uv run python -m src.cli generate --url "<URL>" --output ./output --no-makecode
+```powershell
+# Index scraped stamps into Supabase RAG
+uv run stamp-tools rag index
 
-# Generate all guides from index
-uv run python -m src.cli batch --index "<URL>" --output ./output
+# Re-index specific country/year
+uv run stamp-tools rag index --country "Australia" --year 2021
 
-# List tutorials without processing
-uv run python -m src.cli batch --index "<URL>" --list-only
+# Regenerate descriptions (re-run Groq vision)
+uv run stamp-tools rag index --regenerate
 
-# Generate catalog from existing guides
-uv run python -m src.cli catalog --input ./output
+# Manual search (for testing)
+uv run stamp-tools rag search --query "rocket launch astronaut"
 
-# Generate catalog with custom title
-uv run python -m src.cli catalog --input ./output --title "Nezha Kit Projects"
+# Show RAG statistics
+uv run stamp-tools rag stats
 ```
 
-**Linux/macOS:**
-```bash
-# Generate single guide
-uv run python -m src.cli generate --url "<URL>" --output ./output
+### Stamp Identification
 
-# Generate guide without MakeCode replacement
-uv run python -m src.cli generate --url "<URL>" --output ./output --no-makecode
+```powershell
+# Identify stamps from camera
+uv run stamp-tools identify camera
 
-# Generate all guides from index
-uv run python -m src.cli batch --index "<URL>" --output ./output
+# Identify from image file
+uv run stamp-tools identify image --path "C:\path\to\photo.jpg"
 
-# List tutorials without processing
-uv run python -m src.cli batch --index "<URL>" --list-only
-
-# Generate catalog from existing guides
-uv run python -m src.cli catalog --input ./output
-
-# Generate catalog with custom title
-uv run python -m src.cli catalog --input ./output --title "Nezha Kit Projects"
+# Auto-add confirmed matches to Colnect
+uv run stamp-tools identify camera --add-to-colnect
 ```
 
-**Test:**
+### LASTDODO Migration
 
-**Windows:**
+```powershell
+# Match LASTDODO items to Colnect catalog
+uv run stamp-tools migrate match
+
+# Dry-run import (simulate without updating Colnect)
+uv run stamp-tools migrate import --dry-run
+
+# Live import to Colnect
+uv run stamp-tools migrate import
+
+# Manual review queue for unmatched items
+uv run stamp-tools migrate review
+
+# Show migration status
+uv run stamp-tools migrate status
+```
+
+### Configuration
+
+```powershell
+# Show current configuration
+uv run stamp-tools config show
+
+# Validate all settings and connections
+uv run stamp-tools config validate
+```
+
+### Testing & Linting
+
 ```powershell
 uv run pytest
-```
-
-**Linux/macOS:**
-```bash
-uv run pytest
-```
-
-**Lint:**
-
-**Windows:**
-```powershell
-uv run ruff check src/
-uv run ruff format src/
-```
-
-**Linux/macOS:**
-```bash
 uv run ruff check src/
 uv run ruff format src/
 ```
 
 ## Configuration
 
-Key paths and settings (configurable via environment variables):
-- **Upscayl:** `UPSCAYL_PATH=C:/Program Files/Upscayl/resources/bin/upscayl-bin.exe` (Windows default)
-- **Output:** `OUTPUT_DIR=./output`
-- **Cache:** `CACHE_DIR=./cache`
-- **MakeCode Language:** `MAKECODE_LANGUAGE=nl` (default: Dutch)
-- **MakeCode Timeout:** `MAKECODE_TIMEOUT=30000` (ms, default: 30s)
-- **MakeCode Replacement:** `MAKECODE_REPLACE_ENABLED=True` (default: enabled)
+### Environment Files
 
-### Windows-Specific Settings
+| File | Purpose | Committed |
+|------|---------|-----------|
+| `.env.app` | Application defaults | ✅ Yes |
+| `.env.keys` | API keys and secrets | ❌ No (gitignored) |
+| `.env.local` | User-specific overrides | ❌ No (gitignored) |
 
-**Environment Variables (.env.app):**
+### Key Settings (.env.app)
+
 ```env
-# Use forward slashes in .env files - Python handles conversion
-UPSCAYL_PATH=C:/Program Files/Upscayl/resources/bin/upscayl-bin.exe
-OUTPUT_DIR=./output
-CACHE_DIR=./cache
-IMAGE_OUTPUT_DIR=images
+# Database
+DATABASE_PATH=data/stamps.db
+
+# Scraping
+SCRAPE_DELAY_SECONDS=1.5
+SCRAPE_RETRY_COUNT=3
+SCRAPE_ERROR_BEHAVIOR=skip
+
+# RAG
+RAG_MATCH_AUTO_THRESHOLD=0.9
+RAG_MATCH_MIN_THRESHOLD=0.5
+EMBEDDING_MODEL=text-embedding-3-small
+
+# Vision - Groq
+GROQ_MODEL=llama-3.2-11b-vision-preview
+GROQ_RATE_LIMIT_PER_MINUTE=30
+
+# Object Detection
+YOLO_MODEL_PATH=models/yolov8n.pt
+YOLO_CONFIDENCE_THRESHOLD=0.5
+
+# Browser Automation
+CHROME_CDP_URL=http://localhost:9222
+
+# Logging
+LOG_LEVEL=INFO
 ```
 
-**Path Handling in Code:**
+### Secrets (.env.keys)
+
+```env
+SUPABASE_URL=https://xxxxx.supabase.co
+SUPABASE_KEY=your-service-role-key
+OPENAI_API_KEY=sk-xxxxx
+GROQ_API_KEY=gsk_xxxxx
+```
+
+
+
+## Code Conventions
+
+- **Type hints** on all function signatures
+- **Pydantic** for configuration and data validation
+- **Rich** for all console output (progress bars, tables, colors)
+- **Pathlib** for all file operations (cross-platform)
+- **Docstrings** on all public functions and classes
+- Functions focused and testable
+- Logging at appropriate levels (DEBUG for flow, INFO for status, ERROR for failures)
+
+### Path Handling (Windows)
+
 ```python
 from pathlib import Path
 from src.core.config import get_settings
 
 settings = get_settings()
 
-# ✅ GOOD - Cross-platform compatible
-upscayl_path = Path(settings.UPSCAYL_PATH)
-output_dir = settings.output_path  # Path property from config
-image_dir = output_dir / settings.IMAGE_OUTPUT_DIR
+# ✅ GOOD - Cross-platform
+db_path = Path(settings.DATABASE_PATH)
+model_path = Path(settings.YOLO_MODEL_PATH)
+output_dir = Path("data") / "output"
 
-# ❌ BAD - Windows-specific
-upscayl_path = "C:\\Program Files\\Upscayl\\upscayl.exe"
-output_dir = settings.OUTPUT_DIR + "\\images"
+# ❌ BAD - Windows-specific hardcoding
+db_path = "data\\stamps.db"
 ```
 
-## Code Conventions
+### Error Handling Pattern
 
-- Use type hints for all function signatures
-- Use Pydantic for configuration and data validation
-- Each source site has its own adapter in `src/sources/`
-- Use `rich` for all console output (progress bars, tables, etc.)
-- Keep functions focused and testable
-
-### Windows Compatibility Requirements
-
-**Path Operations:**
-- **Always** use `pathlib.Path` for file operations
-- **Never** hard-code backslashes in Python code
-- **Use** `Path.resolve()` for subprocess commands to avoid working directory issues
-- **Convert** Path objects to strings when passing to external tools
-
-**Subprocess Commands:**
-- **Build** commands as lists, not strings (avoids shell injection issues)
-- **Use** `subprocess.run()` with `text=True` for proper encoding handling
-- **Set** `cwd` parameter for external tools that need specific working directories
-- **Handle** timeouts and encoding errors gracefully
-
-**Example - Upscayl Integration:**
 ```python
-import subprocess
-from pathlib import Path
-from src.core.config import get_settings
+from src.core.errors import ScrapingError
 
-def enhance_image(input_path: Path, output_path: Path) -> bool:
-    """Enhance image using Upscayl with Windows compatibility."""
-    settings = get_settings()
-    upscayl_bin = Path(settings.UPSCAYL_PATH)
-    
-    if not upscayl_bin.exists():
-        logger.error(f"Upscayl not found at: {upscayl_bin}")
-        return False
-    
-    # Use absolute paths
-    input_abs = input_path.resolve()
-    output_abs = output_path.resolve()
-    
-    # Build command as list
-    cmd = [
-        str(upscayl_bin),
-        "-i", str(input_abs),
-        "-o", str(output_abs),
-        "-n", settings.UPSCAYL_MODEL,
-        "-z", str(settings.UPSCAYL_SCALE)
-    ]
-    
-    try:
-        result = subprocess.run(
-            cmd,
-            cwd=str(upscayl_bin.parent.parent),  # resources directory
-            capture_output=True,
-            text=True,
-            timeout=120
-        )
-        return result.returncode == 0
-    except subprocess.TimeoutExpired:
-        logger.warning(f"Enhancement timed out: {input_path}")
-        return False
+try:
+    result = scrape_page(url)
+except Exception as e:
+    context = {'url': url, 'error_type': type(e).__name__}
+    logger.error(f"Scraping failed: {e} | Context: {context}")
+    raise ScrapingError(f"Failed to scrape {url}") from e
 ```
 
-# Environment Instructions
+### Logging Pattern
 
-This is a Windows environment using PowerShell/CMD, NOT bash.
+```python
+import logging
+logger = logging.getLogger(__name__)
 
-## Shell Commands
-- Use PowerShell commands, not bash/Unix commands
-- Use `Get-Content` instead of `cat`
-- Use `type` (CMD) or `Get-Content` (PowerShell) for reading files
-- Use Windows paths with backslashes: `C:\Users\alain\...`
-- Do NOT use Unix paths like `/c/Users/...`
+# Function entry
+logger.debug(f" * scrape_stamp_page > Starting for {url}")
 
-## File Operations
-- Reading files: `Get-Content "C:\path\to\file"`
-- Listing directories: `Get-ChildItem` or `dir`
-- Current directory: `Get-Location` or `pwd`
+# Operational flow
+logger.debug("    -> Extracting title and country")
+
+# Status updates
+logger.info(f"Scraped {count} stamps from {theme}")
+
+# Errors with context
+logger.error(f"Failed: {error} | URL: {url}")
+```
+
+## Data Model
+
+### Local SQLite Entities
+
+**CatalogStamp** — Scraped from Colnect
+- `colnect_id` (PK), `colnect_url`, `title`, `country`, `year`
+- `themes` (JSON), `image_url`, `catalog_codes` (JSON), `scraped_at`
+
+**LastdodoItem** — Scraped from LASTDODO
+- `lastdodo_id` (PK), `title`, `country`, `year`
+- `michel_number`, `yvert_number`, `scott_number`, `sg_number`, `fisher_number`
+- `condition`, `condition_mapped`, `quantity`, `value_eur`, `image_url`, `scraped_at`
+
+**ImportTask** — Migration tracking
+- `id` (PK), `lastdodo_id`, `colnect_id`, `status`
+- `match_method`, `condition_final`, `quantity_final`, `comment`
+- `error_message`, `reviewed_at`, `imported_at`, `dry_run`
+
+### Supabase RAG Entity
+
+**RAGEntry** — Vector search index
+- `id` (PK), `colnect_id` (unique), `colnect_url`, `image_url`
+- `description` (Groq-generated), `embedding` (vector 1536)
+- `country`, `year`, `created_at`, `updated_at`
+
+### Condition Mapping
+
+| LASTDODO (Dutch) | Colnect (English) |
+|------------------|-------------------|
+| Postfris | MNH |
+| Ongebruikt | MNH |
+| Gestempeld | Used |
+
+When multiple conditions: MNH takes precedence, comment contains breakdown (e.g., `MNH:3, U:1`).
+
+## Key Workflows
+
+### 1. Initialization Pipeline
+
+```
+stamp-tools init
+    │
+    ├── Create SQLite database (data/stamps.db)
+    ├── Download YOLOv8 model (models/yolov8n.pt)
+    ├── Verify Supabase connection
+    ├── Verify Groq API key
+    └── Create RAG table in Supabase
+```
+
+### 2. Scrape → Index Pipeline
+
+```
+stamp-tools scrape colnect
+    │
+    ├── Discover stamp URLs by theme
+    ├── For each stamp page:
+    │   ├── Extract: id, title, country, year, image_url, catalog_codes
+    │   └── Save to SQLite (CatalogStamp)
+    └── Checkpoint progress for resume
+
+stamp-tools rag index
+    │
+    ├── Load CatalogStamp entries
+    ├── For each stamp:
+    │   ├── Call Groq API with image_url → description
+    │   ├── Call OpenAI API → embedding (1536 dim)
+    │   └── Upsert to Supabase RAGEntry
+    └── Report statistics
+```
+
+### 3. Identification Pipeline
+
+```
+stamp-tools identify camera
+    │
+    ├── Capture frame from camera (OpenCV)
+    ├── Detect stamps with YOLOv8 → bounding boxes
+    ├── For each detection:
+    │   ├── Crop stamp region
+    │   ├── Call Groq API → description
+    │   ├── Generate embedding → search Supabase
+    │   ├── If score > 90%: auto-accept
+    │   └── Else: show top 3 for selection
+    ├── For confirmed matches:
+    │   └── Browser automation → add to Colnect
+    └── Display summary
+```
+
+### 4. Migration Pipeline
+
+```
+stamp-tools scrape lastdodo → scrape collection
+stamp-tools migrate match   → match by catalog numbers
+stamp-tools migrate import --dry-run → simulate
+stamp-tools migrate review  → handle unmatched
+stamp-tools migrate import  → live import
+stamp-tools migrate status  → verify completion
+```
+
+## Browser Automation (CDP)
+
+The toolset connects to an existing Chrome session via Chrome DevTools Protocol.
+
+### Start Chrome with CDP
+
+```powershell
+# Windows - Start Chrome with remote debugging
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
+```
+
+### Usage in Code
+
+```python
+from playwright.sync_api import sync_playwright
+
+# Connect to existing Chrome
+browser = playwright.chromium.connect_over_cdp("http://localhost:9222")
+page = browser.contexts[0].pages[0]
+
+# User must be logged into Colnect/LASTDODO
+```
+
+**Important:** Log into Colnect and LASTDODO manually before running automation commands.
+
+## External Services
+
+| Service | Purpose | Auth | Free Tier |
+|---------|---------|------|-----------|
+| **Colnect** | Stamp catalog, collection | Browser session | Premium membership |
+| **LASTDODO** | Source collection | Browser session | Free account |
+| **Supabase** | Vector database | API key | 500MB |
+| **OpenAI** | Embeddings | API key | Pay-per-use (~€0.50 total) |
+| **Groq** | Vision descriptions | API key | 30 req/min free |
+
+## Default Themes
+
+```
+Space, Space Traveling, Astronomy, Rockets, Satellites, Scientists
+```
+
+Configurable via `--themes` parameter.
+
+## Important Context
+
+- **Hardware:** AMD Ryzen 9 6900HX (no ROCm support for integrated GPU)
+- **Vision:** Cloud-only via Groq API (no local LLaVA)
+- **Primary platform:** Colnect (source of truth for collection)
+- **LASTDODO:** One-time migration only, no sync back
+- **Cost target:** < €1/month ongoing, ~€6-16 one-time setup
+- **Catalog size:** ~50,000 space-themed stamps expected
+
+## Identification Thresholds
+
+- **Auto-accept:** > 90% similarity score
+- **Show top 3:** ≤ 90% but ≥ 50%
+- **No match:** < 50%
 
 ## Development Workflow
 
@@ -276,22 +459,27 @@ This is a Windows environment using PowerShell/CMD, NOT bash.
 4. Use `/project:validation:validate` to verify changes
 5. Use `/project:commit` to commit changes
 
-## Important Context
+## Environment Instructions
 
-- Target site: Elecfreaks Wiki (wiki.elecfreaks.com)
-- Images hosted on Aliyun CDN
-- 76 tutorials in Nezha Inventor's Kit
-- Upscayl has limited CLI support - may need workarounds
-- Rate limiting important to avoid IP blocking
-- MakeCode screenshots: Automatically replaces English code block images with Dutch versions
-  - Detects MakeCode links in "Reference" sections
-  - Matches code images to MakeCode project URLs
-  - Captures Dutch screenshots using Playwright
-  - Gracefully falls back to original images on failure
+This is a Windows environment using PowerShell/CMD, NOT bash.
+
+### Shell Commands
+- Use PowerShell commands, not bash/Unix commands
+- Use `Get-Content` instead of `cat`
+- Use Windows paths: `C:\Users\alain\...`
+- Do NOT use Unix paths like `/c/Users/...`
+
+### File Operations
+- Reading files: `Get-Content "C:\path\to\file"`
+- Listing directories: `Get-ChildItem` or `dir`
+- Current directory: `Get-Location` or `pwd`
 
 ## External Resources
 
-- [PRD.md](./PRD.md) - Full product requirements
-- [Elecfreaks Wiki](https://wiki.elecfreaks.com/en/microbit/building-blocks/nezha-inventors-kit/)
-- [Upscayl](https://github.com/upscayl/upscayl)
-- [Playwright Python](https://playwright.dev/python/)
+- [PRD.md](./PRD.md) - Full product requirements document
+- [Colnect Stamps](https://colnect.com/en/stamps/) - Primary catalog
+- [LASTDODO](https://www.lastdodo.nl/) - Source collection
+- [Ultralytics YOLOv8](https://docs.ultralytics.com/) - Object detection
+- [Supabase Vector](https://supabase.com/docs/guides/ai/vector-columns) - pgvector docs
+- [Groq Vision](https://console.groq.com/docs/vision) - Vision API
+- [Playwright Python](https://playwright.dev/python/) - Browser automation

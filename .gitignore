@@ -1,55 +1,91 @@
-# Dependencies
-node_modules/
-vendor/
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments
 .venv/
 venv/
-__pycache__/
-*.pyc
-*.pyo
+ENV/
+env/
 
-# Build outputs
-dist/
-build/
-.next/
-out/
-target/
-*.egg-info/
-
-# Environment and secrets
-.env
-.env.*
-!.env.example
-!.env.app
-secrets/
-*.pem
-*.key
-
-# IDE/Editor
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-*.sublime-*
+*~
+
+# Environment secrets - NEVER commit these
+.env.keys
+.env.local
+.env.docker
+
+# Local data and outputs
+data/
+output/
+cache/
+models/
+*.db
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
 
 # OS files
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-logs/
+# Playwright
+.playwright/
 
-# Test and coverage
-.coverage
-htmlcov/
-.pytest_cache/
-.tox/
-
-# Misc
-*.bak
-*.tmp
-
-# Project-specific
-output/
-cache/
-nul
+# Checkpoint files
+*.checkpoint
+*.checkpoint.json
