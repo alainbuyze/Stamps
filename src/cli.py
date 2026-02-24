@@ -183,7 +183,9 @@ def scrape() -> None:
 @click.option("--country", default=None, help="Filter by country")
 @click.option("--year", type=int, default=None, help="Filter by year")
 @click.option("--resume", is_flag=True, help="Resume from checkpoint")
-def scrape_colnect(themes: str, country: str, year: int, resume: bool) -> None:
+@click.option("--dry-run", is_flag=True, help="Show scraped data without saving to database")
+@click.option("--limit", type=int, default=None, help="Limit number of stamps to scrape")
+def scrape_colnect(themes: str, country: str, year: int, resume: bool, dry_run: bool, limit: int) -> None:
     """Scrape Colnect for space-themed stamps.
 
     Examples:
@@ -191,6 +193,12 @@ def scrape_colnect(themes: str, country: str, year: int, resume: bool) -> None:
         stamp-tools scrape colnect --themes "Space,Rockets"
         stamp-tools scrape colnect --country "Australia" --year 2021
         stamp-tools scrape colnect --resume
+        stamp-tools scrape colnect --dry-run --limit 5
+        # Preview 3 stamps without saving
+        stamp-tools scrape colnect --themes "Rockets" --country "Ascension Island" --dry-run --limit 3
+
+        # Or with debug logging to see full details
+        stamp-tools --debug scrape colnect --themes "Rockets" --country "Ascension Island" --dry-run --limit 3
     """
     import asyncio
 
@@ -209,6 +217,10 @@ def scrape_colnect(themes: str, country: str, year: int, resume: bool) -> None:
         console.print(f"[bold]Year filter:[/bold] {year}")
     if resume:
         console.print("[bold]Mode:[/bold] Resuming from checkpoint")
+    if dry_run:
+        console.print("[bold]Mode:[/bold] [yellow]DRY RUN - not saving to database[/yellow]")
+    if limit:
+        console.print(f"[bold]Limit:[/bold] {limit} stamps")
 
     console.print()
 
@@ -231,6 +243,8 @@ def scrape_colnect(themes: str, country: str, year: int, resume: bool) -> None:
                         country_filter=country,
                         year_filter=year,
                         progress_callback=on_progress,
+                        dry_run=dry_run,
+                        limit=limit,
                     )
                 return total
             except Exception as e:
@@ -240,12 +254,21 @@ def scrape_colnect(themes: str, country: str, year: int, resume: bool) -> None:
     try:
         total = asyncio.run(run_scraper())
         console.print()
-        console.print(Panel(
-            f"[green]Scraping complete![/green]\n"
-            f"Total stamps scraped: {total}",
-            title="Summary",
-            style="green",
-        ))
+        if dry_run:
+            console.print(Panel(
+                f"[yellow]DRY RUN complete![/yellow]\n"
+                f"Total stamps found: {total}\n"
+                f"[dim]No data was saved to database[/dim]",
+                title="Summary",
+                style="yellow",
+            ))
+        else:
+            console.print(Panel(
+                f"[green]Scraping complete![/green]\n"
+                f"Total stamps scraped: {total}",
+                title="Summary",
+                style="green",
+            ))
     except KeyboardInterrupt:
         console.print("\n[yellow]Scraping interrupted. Progress saved to checkpoint.[/yellow]")
         sys.exit(130)
@@ -278,48 +301,352 @@ def rag() -> None:
     pass
 
 
+@rag.command("init")
+def rag_init() -> None:
+    """Initialize RAG table in Supabase.
+
+    Creates the stamps_rag table with pgvector support if it doesn't exist.
+    Also shows the SQL needed to create the similarity search function.
+
+    Example:
+        stamp-tools rag init
+    """
+    from src.rag.supabase_client import SupabaseRAG, MATCH_STAMPS_SQL
+
+    console.print(Panel("RAG Database Initialization", style="bold blue"))
+
+    try:
+        supabase = SupabaseRAG()
+        console.print("[dim]Connected to Supabase[/dim]\n")
+
+        console.print("[bold]1. Verifying stamps_rag table...[/bold]")
+        try:
+            supabase.init_table()
+            console.print("   [green]✓[/green] Table exists and is accessible")
+        except Exception as e:
+            console.print(f"   [red]✗[/red] Table verification failed: {e}")
+            console.print("\n[yellow]Please create the table manually in Supabase SQL Editor:[/yellow]")
+            console.print("""
+CREATE TABLE IF NOT EXISTS stamps_rag (
+    id BIGSERIAL PRIMARY KEY,
+    colnect_id TEXT UNIQUE NOT NULL,
+    colnect_url TEXT NOT NULL,
+    image_url TEXT NOT NULL,
+    description TEXT NOT NULL,
+    embedding VECTOR(1536) NOT NULL,
+    country TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_stamps_rag_colnect_id ON stamps_rag(colnect_id);
+CREATE INDEX IF NOT EXISTS idx_stamps_rag_country ON stamps_rag(country);
+CREATE INDEX IF NOT EXISTS idx_stamps_rag_year ON stamps_rag(year);
+""")
+            sys.exit(1)
+
+        console.print("\n[bold]2. Similarity search function[/bold]")
+        console.print("   For optimal performance, create this function in Supabase SQL Editor:")
+        console.print()
+        console.print(Panel(MATCH_STAMPS_SQL, title="match_stamps function", border_style="dim"))
+
+        console.print(Panel(
+            "[green]RAG database ready![/green]\n"
+            "Run 'stamp-tools rag index' to start indexing stamps.",
+            title="Summary",
+            style="green",
+        ))
+
+    except Exception as e:
+        console.print(f"[red]Initialization failed: {e}[/red]")
+        console.print("[dim]Check your Supabase configuration in .env.keys[/dim]")
+        sys.exit(1)
+
+
 @rag.command("index")
 @click.option("--country", default=None, help="Filter by country")
 @click.option("--year", type=int, default=None, help="Filter by year")
 @click.option("--regenerate", is_flag=True, help="Regenerate descriptions")
-def rag_index(country: str, year: int, regenerate: bool) -> None:
+@click.option("--batch", is_flag=True, help="Use optimized batch processing")
+def rag_index(country: str, year: int, regenerate: bool, batch: bool) -> None:
     """Index scraped stamps into Supabase RAG.
+
+    Generates descriptions via Groq vision API and embeddings via OpenAI,
+    then stores in Supabase for vector similarity search.
 
     Examples:
         stamp-tools rag index
         stamp-tools rag index --country "Australia" --year 2021
         stamp-tools rag index --regenerate
+        stamp-tools rag index --batch
     """
-    console.print("[yellow]RAG indexer not yet implemented (Phase 3)[/yellow]")
-    console.print("This will generate descriptions and embeddings for stamps.")
+    import asyncio
+
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+
+    from src.rag.indexer import RAGIndexer
+
+    console.print(Panel("RAG Indexer", style="bold blue"))
 
     if country:
-        console.print(f"Country filter: {country}")
+        console.print(f"[bold]Country filter:[/bold] {country}")
     if year:
-        console.print(f"Year filter: {year}")
+        console.print(f"[bold]Year filter:[/bold] {year}")
     if regenerate:
-        console.print("Regenerating all descriptions...")
+        console.print("[bold]Mode:[/bold] Regenerating all descriptions")
+    if batch:
+        console.print("[bold]Mode:[/bold] Optimized batch processing")
+
+    console.print()
+
+    # Verify setup first
+    indexer = RAGIndexer()
+    console.print("[dim]Verifying API connections...[/dim]")
+
+    try:
+        status = indexer.verify_setup()
+        all_ready = all(status.values())
+
+        for component, ready in status.items():
+            if ready:
+                console.print(f"   [green]✓[/green] {component}")
+            else:
+                console.print(f"   [red]✗[/red] {component}")
+
+        if not all_ready:
+            console.print("\n[red]Cannot proceed - some components not ready.[/red]")
+            console.print("[dim]Check your API keys in .env.keys[/dim]")
+            sys.exit(1)
+
+    except Exception as e:
+        console.print(f"\n[red]Setup verification failed: {e}[/red]")
+        sys.exit(1)
+
+    console.print()
+
+    async def run_indexing():
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Starting indexer...", total=None)
+
+            def on_progress(current: int, total: int, message: str):
+                progress.update(task, total=total, completed=current, description=message)
+
+            try:
+                if batch:
+                    stats = await indexer.index_batch_optimized(
+                        country=country,
+                        year=year,
+                        regenerate=regenerate,
+                        progress_callback=on_progress,
+                    )
+                else:
+                    stats = await indexer.index_all(
+                        country=country,
+                        year=year,
+                        regenerate=regenerate,
+                        progress_callback=on_progress,
+                    )
+                return stats
+            except Exception as e:
+                logger.error(f"Indexing failed: {e}")
+                raise
+
+    try:
+        stats = asyncio.run(run_indexing())
+        console.print()
+
+        # Show results
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Metric")
+        table.add_column("Count", justify="right")
+
+        table.add_row("Total stamps", str(stats.total_stamps))
+        table.add_row("Already indexed", str(stats.already_indexed))
+        table.add_row("Newly indexed", str(stats.newly_indexed))
+        table.add_row("Description failures", str(stats.description_failures))
+        table.add_row("Success rate", f"{stats.success_rate:.1f}%")
+
+        console.print(table)
+
+        if stats.newly_indexed > 0:
+            console.print(Panel(
+                f"[green]Indexing complete![/green]\n"
+                f"Indexed {stats.newly_indexed} new stamps",
+                title="Summary",
+                style="green",
+            ))
+        else:
+            console.print(Panel(
+                "[yellow]No new stamps to index[/yellow]",
+                title="Summary",
+                style="yellow",
+            ))
+
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Indexing interrupted.[/yellow]")
+        sys.exit(130)
+    except Exception as e:
+        console.print(f"\n[red]Indexing failed: {e}[/red]")
+        sys.exit(1)
 
 
 @rag.command("search")
 @click.option("--query", required=True, help="Search query")
 @click.option("--limit", default=5, help="Number of results")
-def rag_search(query: str, limit: int) -> None:
+@click.option("--country", default=None, help="Filter by country")
+@click.option("--year", type=int, default=None, help="Filter by year")
+def rag_search(query: str, limit: int, country: str, year: int) -> None:
     """Manual similarity search for testing.
 
-    Example:
+    Search the RAG database using natural language queries.
+
+    Examples:
         stamp-tools rag search --query "rocket launch astronaut"
+        stamp-tools rag search --query "Soviet space dog" --country "Russia"
+        stamp-tools rag search --query "Apollo mission" --year 1969
     """
-    console.print("[yellow]RAG search not yet implemented (Phase 3)[/yellow]")
-    console.print(f"Searching for: {query}")
-    console.print(f"Limit: {limit}")
+    from src.rag.search import RAGSearcher, MatchConfidence
+
+    console.print(Panel("RAG Search", style="bold blue"))
+    console.print(f"[bold]Query:[/bold] {query}")
+    if country:
+        console.print(f"[bold]Country filter:[/bold] {country}")
+    if year:
+        console.print(f"[bold]Year filter:[/bold] {year}")
+    console.print()
+
+    try:
+        searcher = RAGSearcher()
+        results = searcher.search(
+            query=query,
+            top_k=limit,
+            country=country,
+            year=year,
+        )
+
+        if not results:
+            console.print("[yellow]No matching stamps found.[/yellow]")
+            console.print("[dim]Try a different query or adjust filters.[/dim]")
+            return
+
+        console.print(f"[bold]Found {len(results)} matches:[/bold]\n")
+
+        for result in results:
+            # Color based on confidence
+            if result.confidence == MatchConfidence.AUTO_ACCEPT:
+                score_style = "green"
+            elif result.confidence == MatchConfidence.REVIEW:
+                score_style = "yellow"
+            else:
+                score_style = "red"
+
+            table = Table(show_header=False, box=None, padding=(0, 1))
+            table.add_column("Key", style="dim")
+            table.add_column("Value")
+
+            table.add_row("Rank", f"#{result.rank}")
+            table.add_row("Score", f"[{score_style}]{result.percentage:.1f}%[/{score_style}]")
+            table.add_row("ID", result.entry.colnect_id)
+            table.add_row("Country", result.entry.country)
+            table.add_row("Year", str(result.entry.year))
+            table.add_row("URL", result.entry.colnect_url)
+
+            # Truncate description
+            desc = result.entry.description
+            if len(desc) > 200:
+                desc = desc[:200] + "..."
+            table.add_row("Description", desc)
+
+            console.print(Panel(table, title=f"Match #{result.rank}", border_style=score_style))
+            console.print()
+
+    except Exception as e:
+        console.print(f"[red]Search failed: {e}[/red]")
+        sys.exit(1)
 
 
 @rag.command("stats")
 def rag_stats() -> None:
-    """Show RAG database statistics."""
-    console.print("[yellow]RAG stats not yet implemented (Phase 3)[/yellow]")
-    console.print("This will show statistics about the RAG index.")
+    """Show RAG database statistics.
+
+    Displays information about the indexed stamps in Supabase.
+
+    Example:
+        stamp-tools rag stats
+    """
+    from src.rag.supabase_client import SupabaseRAG
+
+    console.print(Panel("RAG Database Statistics", style="bold blue"))
+
+    try:
+        supabase = SupabaseRAG()
+        stats = supabase.get_stats()
+
+        if "error" in stats:
+            console.print(f"[yellow]Warning: {stats['error']}[/yellow]\n")
+
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Metric")
+        table.add_column("Value", justify="right")
+
+        table.add_row("Total indexed stamps", str(stats["total_entries"]))
+        table.add_row("Number of countries", str(stats["country_count"]))
+
+        year_range = stats["year_range"]
+        if year_range["min"] and year_range["max"]:
+            table.add_row("Year range", f"{year_range['min']} - {year_range['max']}")
+        else:
+            table.add_row("Year range", "N/A")
+
+        console.print(table)
+
+        # Show countries if not too many
+        countries = stats.get("countries", [])
+        if countries:
+            console.print(f"\n[bold]Countries ({len(countries)}):[/bold]")
+            if len(countries) <= 20:
+                console.print(", ".join(countries))
+            else:
+                console.print(", ".join(countries[:20]) + f" ... and {len(countries) - 20} more")
+
+        # Also show local database stats for comparison
+        console.print("\n[bold]Local Database Comparison:[/bold]")
+        db_stats = get_database_stats()
+
+        compare_table = Table(show_header=True, header_style="bold")
+        compare_table.add_column("Source")
+        compare_table.add_column("Count", justify="right")
+        compare_table.add_column("Status")
+
+        local_count = db_stats["catalog_stamps"]
+        rag_count = stats["total_entries"]
+
+        if local_count == 0:
+            status = "[dim]No stamps scraped[/dim]"
+        elif rag_count == local_count:
+            status = "[green]Fully indexed[/green]"
+        elif rag_count > 0:
+            pct = (rag_count / local_count) * 100
+            status = f"[yellow]{pct:.1f}% indexed[/yellow]"
+        else:
+            status = "[red]Not indexed[/red]"
+
+        compare_table.add_row("Local SQLite", str(local_count), "")
+        compare_table.add_row("Supabase RAG", str(rag_count), status)
+
+        console.print(compare_table)
+
+    except Exception as e:
+        console.print(f"[red]Failed to get stats: {e}[/red]")
+        console.print("[dim]Check your Supabase configuration in .env.keys[/dim]")
+        sys.exit(1)
 
 
 # =============================================================================

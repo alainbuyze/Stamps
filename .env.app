@@ -29,7 +29,7 @@ EMBEDDING_MODEL=text-embedding-3-small
 # =============================================================================
 # Vision Settings (Groq)
 # =============================================================================
-GROQ_MODEL=llama-3.2-11b-vision-preview
+GROQ_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 GROQ_RATE_LIMIT_PER_MINUTE=30
 VISION_PROMPT_PATH=config/llava_prompt.txt
 

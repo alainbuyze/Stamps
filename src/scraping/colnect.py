@@ -34,15 +34,40 @@ logger = logging.getLogger(__name__)
 COLNECT_BASE_URL = "https://colnect.com"
 COLNECT_STAMPS_URL = f"{COLNECT_BASE_URL}/en/stamps"
 
-# Theme name to ID mapping (will be populated dynamically or use known IDs)
-# These are the space-related theme IDs on Colnect
+# Theme name to ID mapping - Colnect uses numeric IDs
+# URL pattern: /en/stamps/list/theme/ID-Theme_Name
 SPACE_THEMES = {
-    "Space": "space",
-    "Space Traveling": "space_traveling",
-    "Astronomy": "astronomy",
-    "Rockets": "rockets",
-    "Satellites": "satellites",
-    "Scientists": "scientists",
+    "Space": "2938-Outer_Space",          # Outer Space theme
+    "Space Traveling": "144-Space_Traveling",
+    "Astronomy": "330-Astronomy",
+    "Rockets": "1627-Rockets",
+    "Satellites": "1640-Satellites",
+    "Scientists": "175-Scientists",
+}
+
+# Country name to ID mapping for common countries
+# URL pattern: /en/stamps/list/country/ID-Country_Name/theme/ID-Theme_Name
+COUNTRY_IDS = {
+    "Ascension Island": "253-Ascension_Island",
+    "Australia": "12-Australia",
+    "Austria": "13-Austria",
+    "Belgium": "17-Belgium",
+    "Canada": "38-Canada",
+    "China": "43-China",
+    "France": "73-France",
+    "Germany": "79-Germany",
+    "India": "97-India",
+    "Italy": "102-Italy",
+    "Japan": "105-Japan",
+    "Netherlands": "147-Netherlands",
+    "New Zealand": "149-New_Zealand",
+    "Russia": "175-Russia",
+    "South Africa": "197-South_Africa",
+    "Spain": "199-Spain",
+    "Switzerland": "207-Switzerland",
+    "United Kingdom": "75-Great_Britain",
+    "United States": "225-United_States",
+    "USSR": "223-USSR",
 }
 
 
@@ -156,19 +181,38 @@ class ColnectScraper:
     # Theme Discovery
     # =========================================================================
 
-    def get_theme_url(self, theme_slug: str, page: int = 1) -> str:
-        """Get URL for theme listing page.
+    def get_theme_url(
+        self,
+        theme_slug: str,
+        page: int = 1,
+        country_slug: Optional[str] = None,
+        year: Optional[int] = None,
+    ) -> str:
+        """Get URL for theme listing page, optionally filtered by country and year.
 
         Args:
-            theme_slug: Theme identifier (e.g., 'space', 'astronomy')
+            theme_slug: Theme identifier (e.g., '1627-Rockets', '330-Astronomy')
             page: Page number (1-indexed)
+            country_slug: Optional country identifier (e.g., '253-Ascension_Island')
+            year: Optional year filter (e.g., 1971)
 
         Returns:
             Full URL for theme listing
         """
-        # Colnect uses different URL patterns for themes
-        # Example: /en/stamps/list/theme/space/page/2
-        base = f"{COLNECT_STAMPS_URL}/list/theme/{theme_slug}"
+        # Build URL with filters
+        # Pattern: /en/stamps/list/country/ID-Country/theme/ID-Theme/year/YYYY
+        parts = [COLNECT_STAMPS_URL, "list"]
+
+        if country_slug:
+            parts.extend(["country", country_slug])
+
+        parts.extend(["theme", theme_slug])
+
+        if year:
+            parts.extend(["year", str(year)])
+
+        base = "/".join(parts)
+
         if page > 1:
             return f"{base}/page/{page}"
         return base
@@ -178,6 +222,8 @@ class ColnectScraper:
         page: Page,
         theme_slug: str,
         page_number: int = 1,
+        country_slug: Optional[str] = None,
+        year: Optional[int] = None,
     ) -> tuple[list[str], bool]:
         """Get stamp URLs from a theme listing page.
 
@@ -185,31 +231,48 @@ class ColnectScraper:
             page: Playwright page instance
             theme_slug: Theme identifier
             page_number: Page number
+            country_slug: Optional country identifier for filtering
+            year: Optional year for filtering
 
         Returns:
             Tuple of (list of stamp URLs, has_next_page)
         """
-        url = self.get_theme_url(theme_slug, page_number)
+        url = self.get_theme_url(theme_slug, page_number, country_slug, year)
+        logger.debug(f"Fetching stamp list from: {url}")
         content = await self._browser.goto_and_get_content(page, url)
         soup = BeautifulSoup(content, "html.parser")
 
-        # Extract stamp links - they typically follow pattern /en/stamps/stamp/ID-Slug
+        # Extract stamp links - pattern: /en/stamps/stamp/ID-Slug
+        # Skip fragment links (e.g., #minorvariants) as they're not separate pages
         stamp_links = []
         for link in soup.find_all("a", href=True):
             href = link["href"]
-            if "/stamps/stamp/" in href:
+            if "/stamps/stamp/" in href and "#" not in href:
                 full_url = urljoin(COLNECT_BASE_URL, href)
                 if full_url not in stamp_links:
                     stamp_links.append(full_url)
 
-        # Check for next page
+        # Check for next page - Colnect uses various pagination patterns
         has_next = False
-        pagination = soup.find("div", class_="pagination") or soup.find("nav", class_="pagination")
-        if pagination:
-            next_link = pagination.find("a", text=re.compile(r"Next|>|»"))
-            has_next = next_link is not None
 
-        logger.debug(f"Found {len(stamp_links)} stamps on {theme_slug} page {page_number}")
+        # Method 1: Look for "page/N" links where N > current page
+        next_page_pattern = f"/page/{page_number + 1}"
+        for link in soup.find_all("a", href=True):
+            if next_page_pattern in link["href"]:
+                has_next = True
+                break
+
+        # Method 2: Look for pagination container with next link
+        if not has_next:
+            pagination = soup.find("ul", class_="pagination") or soup.find("div", class_="pagination")
+            if pagination:
+                for link in pagination.find_all("a", href=True):
+                    href = link["href"]
+                    if f"/page/{page_number + 1}" in href or ">>" in link.get_text():
+                        has_next = True
+                        break
+
+        logger.info(f"Found {len(stamp_links)} stamps on {theme_slug} page {page_number} (has_next={has_next})")
         return stamp_links, has_next
 
     # =========================================================================
@@ -229,7 +292,21 @@ class ColnectScraper:
         Raises:
             ExtractionError: If required data cannot be extracted
         """
-        content = await self._browser.goto_and_get_content(page, url)
+        # Navigate and wait for dynamic content to load
+        await self._browser.goto(page, url)
+
+        # Wait for JavaScript to populate the obfuscated content
+        # Colnect uses placeholders like "ColnectIsBest" that get replaced by JS
+        try:
+            await page.wait_for_function(
+                "!document.body.innerText.includes('ColnectIsBest')",
+                timeout=5000
+            )
+        except Exception:
+            # Timeout is OK - some pages might not have this placeholder
+            pass
+
+        content = await self._browser.get_content(page)
         soup = BeautifulSoup(content, "html.parser")
 
         try:
@@ -243,8 +320,8 @@ class ColnectScraper:
             # Extract title - usually in h1 or specific element
             title = self._extract_title(soup)
 
-            # Extract country
-            country = self._extract_country(soup)
+            # Extract country (pass URL for fallback extraction)
+            country = self._extract_country(soup, url)
 
             # Extract year
             year = self._extract_year(soup)
@@ -295,66 +372,116 @@ class ColnectScraper:
 
         raise ExtractionError("Cannot extract title")
 
-    def _extract_country(self, soup: BeautifulSoup) -> str:
+    def _extract_country(self, soup: BeautifulSoup, url: str = "") -> str:
         """Extract issuing country from page."""
-        # Look for country in metadata or breadcrumb
+        # Method 1: Look for country link
         country_elem = soup.find("a", href=re.compile(r"/stamps/country/"))
         if country_elem:
             return country_elem.get_text(strip=True)
 
-        # Try metadata table
+        # Method 2: Try metadata table with various labels
         for row in soup.find_all("tr"):
             th = row.find("th")
             td = row.find("td")
             if th and td:
                 label = th.get_text(strip=True).lower()
-                if "country" in label or "issuer" in label:
+                if any(x in label for x in ["country", "issuer", "territory"]):
+                    # Get text from link if present, otherwise direct text
+                    link = td.find("a")
+                    if link:
+                        return link.get_text(strip=True)
                     return td.get_text(strip=True)
+
+        # Method 3: Extract from URL - last segment often contains country
+        # URL format: /stamp/ID-Name-Series-Country (with underscores)
+        if url:
+            parts = url.rstrip("/").split("-")
+            if len(parts) >= 2:
+                # Last part is often country with underscores
+                country = parts[-1].replace("_", " ")
+                if country and len(country) > 2:
+                    return country
+
+        # Method 4: Look in page text for "Issued by:" pattern
+        text = soup.get_text()
+        match = re.search(r"(?:issued by|country)[:\s]+([A-Za-z\s]+)", text, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
 
         raise ExtractionError("Cannot extract country")
 
     def _extract_year(self, soup: BeautifulSoup) -> int:
         """Extract year of issue from page."""
-        # Look for year in metadata
+        # Method 1: Look for "Issued on: YYYY-MM-DD" pattern in metadata
         for row in soup.find_all("tr"):
             th = row.find("th")
             td = row.find("td")
             if th and td:
                 label = th.get_text(strip=True).lower()
-                if "year" in label or "issued" in label:
+                if any(x in label for x in ["year", "issued", "date", "release"]):
                     text = td.get_text(strip=True)
+                    # Match YYYY-MM-DD or just YYYY
                     match = re.search(r"\b(19|20)\d{2}\b", text)
                     if match:
                         return int(match.group())
 
-        # Try to find year in page content
+        # Method 2: Search entire page for date patterns
         text = soup.get_text()
-        # Look for "Issue Year: YYYY" or similar patterns
-        match = re.search(r"(?:year|issued)[:\s]+(\d{4})", text, re.IGNORECASE)
-        if match:
-            return int(match.group(1))
+
+        # Pattern: "Issued on: 1971-02-15" or "Issue date: 1971"
+        patterns = [
+            r"issued\s+on[:\s]+(\d{4})",
+            r"issue\s+date[:\s]+(\d{4})",
+            r"year\s+of\s+issue[:\s]+(\d{4})",
+            r"(\d{4})-\d{2}-\d{2}",  # ISO date format
+            r"(?:19|20)\d{2}",  # Any 4-digit year
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                year_str = match.group(1) if match.lastindex else match.group()
+                year = int(year_str[:4])  # Take first 4 digits
+                if 1840 <= year <= 2030:  # Reasonable stamp year range
+                    return year
 
         raise ExtractionError("Cannot extract year")
 
     def _extract_image_url(self, soup: BeautifulSoup) -> str:
         """Extract main stamp image URL from page."""
-        # Look for main stamp image
-        img = soup.find("img", class_="item_image") or soup.find("img", id="item_image")
-        if img and img.get("src"):
-            return urljoin(COLNECT_BASE_URL, img["src"])
-
-        # Try data-src for lazy loaded images
-        if img and img.get("data-src"):
-            return urljoin(COLNECT_BASE_URL, img["data-src"])
-
-        # Look in figure or main image container
-        figure = soup.find("figure", class_="item_photo") or soup.find("div", class_="item_photo")
-        if figure:
-            img = figure.find("img")
+        # Method 1: Look for main stamp image by class/id
+        for selector in ["item_image", "item_photo", "stamp_image", "main_image"]:
+            img = soup.find("img", class_=selector) or soup.find("img", id=selector)
             if img:
-                src = img.get("src") or img.get("data-src")
-                if src:
+                # Try various attributes for the actual URL
+                for attr in ["src", "data-src", "data-lazy-src", "data-original"]:
+                    url = img.get(attr)
+                    if url and not url.startswith("data:"):  # Skip data URIs
+                        return urljoin(COLNECT_BASE_URL, url)
+
+        # Method 2: Look in figure or image container
+        for container_class in ["item_photo", "photo", "stamp_photo", "main_photo"]:
+            container = soup.find("figure", class_=container_class) or soup.find("div", class_=container_class)
+            if container:
+                img = container.find("img")
+                if img:
+                    for attr in ["src", "data-src", "data-lazy-src", "data-original"]:
+                        url = img.get(attr)
+                        if url and not url.startswith("data:"):
+                            return urljoin(COLNECT_BASE_URL, url)
+
+        # Method 3: Find any large image (likely the main stamp image)
+        for img in soup.find_all("img"):
+            src = img.get("src") or img.get("data-src")
+            if src and not src.startswith("data:"):
+                # Look for image URLs that seem like stamp images
+                if any(x in src.lower() for x in ["stamp", "image", "photo", "/i/"]):
                     return urljoin(COLNECT_BASE_URL, src)
+
+        # Method 4: Look for og:image meta tag
+        og_image = soup.find("meta", property="og:image")
+        if og_image and og_image.get("content"):
+            return og_image["content"]
 
         raise ExtractionError("Cannot extract image URL")
 
@@ -421,6 +548,8 @@ class ColnectScraper:
         country_filter: Optional[str] = None,
         year_filter: Optional[int] = None,
         progress_callback: Optional[Callable[[int, str], None]] = None,
+        dry_run: bool = False,
+        limit: Optional[int] = None,
     ) -> int:
         """Scrape stamps from specified themes.
 
@@ -430,6 +559,8 @@ class ColnectScraper:
             country_filter: Only scrape stamps from this country
             year_filter: Only scrape stamps from this year
             progress_callback: Called with (count, message) for progress updates
+            dry_run: If True, display data but don't save to database
+            limit: Maximum number of stamps to scrape
 
         Returns:
             Number of stamps scraped
@@ -442,6 +573,21 @@ class ColnectScraper:
         start_theme_idx = 0
         start_page = 1
         processed_urls: set[str] = set()
+
+        # Resolve country filter to Colnect country slug
+        country_slug = None
+        if country_filter:
+            country_slug = COUNTRY_IDS.get(country_filter)
+            if not country_slug:
+                # Try to construct slug from country name
+                country_slug = country_filter.replace(" ", "_")
+                # If it looks like it already has an ID (e.g., "253-Ascension_Island"), use as-is
+                if not country_slug[0].isdigit():
+                    logger.warning(
+                        f"Country '{country_filter}' not in COUNTRY_IDS mapping. "
+                        f"Using '{country_slug}' - this may not work. "
+                        f"Consider adding the country ID to COUNTRY_IDS."
+                    )
 
         # Load checkpoint if resuming
         if resume:
@@ -466,10 +612,10 @@ class ColnectScraper:
                 logger.info(f"Scraping theme: {theme}")
 
                 while True:
-                    # Get stamp URLs from listing page
+                    # Get stamp URLs from listing page (with country/year filters in URL if specified)
                     try:
                         stamp_urls, has_next = await self.get_theme_stamp_urls(
-                            page, theme_slug, page_number
+                            page, theme_slug, page_number, country_slug, year_filter
                         )
                     except Exception as e:
                         logger.error(f"Failed to get theme page {theme} #{page_number}: {e}")
@@ -483,19 +629,36 @@ class ColnectScraper:
                         try:
                             stamp = await self.scrape_stamp_page(page, url)
 
-                            # Apply filters
-                            if country_filter and stamp.country != country_filter:
-                                continue
+                            # Verify year matches (fallback check - URL filtering may not be exact)
                             if year_filter and stamp.year != year_filter:
+                                processed_urls.add(url)  # Mark as processed to avoid re-scraping
                                 continue
 
-                            # Save to database
-                            upsert_catalog_stamp(stamp)
+                            if dry_run:
+                                # Display stamp data without saving
+                                logger.info(
+                                    f"[DRY RUN] Stamp: {stamp.colnect_id}\n"
+                                    f"  Title: {stamp.title}\n"
+                                    f"  Country: {stamp.country}\n"
+                                    f"  Year: {stamp.year}\n"
+                                    f"  Image: {stamp.image_url}\n"
+                                    f"  Themes: {', '.join(stamp.themes)}\n"
+                                    f"  Catalog: {stamp.catalog_codes}"
+                                )
+                            else:
+                                # Save to database
+                                upsert_catalog_stamp(stamp)
+
                             total_scraped += 1
                             processed_urls.add(url)
 
                             if progress_callback:
                                 progress_callback(total_scraped, f"Scraped: {stamp.title[:50]}")
+
+                            # Check limit
+                            if limit and total_scraped >= limit:
+                                logger.info(f"Reached limit of {limit} stamps")
+                                return total_scraped
 
                         except ExtractionError as e:
                             logger.warning(f"Extraction failed for {url}: {e}")
