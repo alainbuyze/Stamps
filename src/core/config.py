@@ -1,6 +1,13 @@
-"""Configuration management using Pydantic Settings."""
+"""Configuration management for Stamp Collection Toolset.
+
+Uses Pydantic Settings to load configuration from environment files:
+- .env.app: Application defaults (committed)
+- .env.keys: API keys and secrets (gitignored)
+- .env.local: User-specific overrides (gitignored)
+"""
 
 from pathlib import Path
+from typing import Optional
 
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,95 +23,212 @@ class Settings(BaseSettings):
         extra="allow",
     )
 
-    # Output settings
-    OUTPUT_ROOT_DIR: str = Field(default=".", description="Root directory for all output files")
-    OUTPUT_DIR: str = Field(default="output", description="Subdirectory within OUTPUT_ROOT_DIR for generated guides")
-    CACHE_DIR: str = Field(default="cache", description="Subdirectory within OUTPUT_ROOT_DIR for cached pages")
-    LOG_DIR: str = Field(default="logs", description="Subdirectory within OUTPUT_ROOT_DIR for log files")
+    # ==========================================================================
+    # Database Settings
+    # ==========================================================================
+    DATABASE_PATH: str = Field(
+        default="data/stamps.db",
+        description="Path to SQLite database file",
+    )
 
-    # Scraping settings
-    RATE_LIMIT_SECONDS: float = Field(default=2.0, description="Delay between requests")
-    BROWSER_HEADLESS: bool = Field(default=True, description="Run browser in headless mode")
-    BROWSER_TIMEOUT: int = Field(default=60000, description="Browser timeout in milliseconds")
-    SCRAPE_MAX_RETRIES: int = Field(default=3, description="Maximum retry attempts for failed scrapes")
-    SCRAPE_RETRY_DELAY: float = Field(default=5.0, description="Initial delay between retries in seconds")
-    SCRAPE_RETRY_BACKOFF: float = Field(default=2.0, description="Backoff multiplier for retry delays")
+    # ==========================================================================
+    # Scraping Settings
+    # ==========================================================================
+    SCRAPE_DELAY_SECONDS: float = Field(
+        default=1.5,
+        description="Delay between scraping requests (polite crawling)",
+    )
+    SCRAPE_RETRY_COUNT: int = Field(
+        default=3,
+        description="Number of retry attempts for failed scrapes",
+    )
+    SCRAPE_ERROR_BEHAVIOR: str = Field(
+        default="skip",
+        description="Error behavior: 'skip' to continue, 'abort' to stop",
+    )
+    SCRAPE_CHECKPOINT_FILE: str = Field(
+        default="data/scrape_checkpoint.json",
+        description="Path to checkpoint file for resuming scrapes",
+    )
 
-    # Logging settings
-    LOG_LEVEL: str = Field(default="INFO", description="Logging level")
+    # Browser settings for Playwright
+    BROWSER_HEADLESS: bool = Field(
+        default=True,
+        description="Run browser in headless mode",
+    )
+    BROWSER_TIMEOUT: int = Field(
+        default=60000,
+        description="Browser timeout in milliseconds",
+    )
+
+    # ==========================================================================
+    # RAG Settings
+    # ==========================================================================
+    RAG_MATCH_AUTO_THRESHOLD: float = Field(
+        default=0.9,
+        description="Similarity score threshold for auto-accepting matches (0-1)",
+    )
+    RAG_MATCH_MIN_THRESHOLD: float = Field(
+        default=0.5,
+        description="Minimum similarity score to consider a match (0-1)",
+    )
+    EMBEDDING_MODEL: str = Field(
+        default="text-embedding-3-small",
+        description="OpenAI embedding model name",
+    )
+    EMBEDDING_DIMENSIONS: int = Field(
+        default=1536,
+        description="Embedding vector dimensions",
+    )
+
+    # ==========================================================================
+    # Vision Settings (Groq)
+    # ==========================================================================
+    GROQ_MODEL: str = Field(
+        default="llama-3.2-11b-vision-preview",
+        description="Groq vision model for stamp descriptions",
+    )
+    GROQ_RATE_LIMIT_PER_MINUTE: int = Field(
+        default=30,
+        description="Groq API rate limit (requests per minute)",
+    )
+    VISION_PROMPT_FILE: str = Field(
+        default="config/llava_prompt.txt",
+        description="Path to vision prompt template file",
+    )
+
+    # ==========================================================================
+    # Object Detection Settings (YOLO)
+    # ==========================================================================
+    YOLO_MODEL_PATH: str = Field(
+        default="models/yolov8n.pt",
+        description="Path to YOLOv8 model weights",
+    )
+    YOLO_CONFIDENCE_THRESHOLD: float = Field(
+        default=0.5,
+        description="Minimum confidence for stamp detection (0-1)",
+    )
+
+    # ==========================================================================
+    # Camera Settings
+    # ==========================================================================
+    CAMERA_INDEX: int = Field(
+        default=0,
+        description="Camera device index for OpenCV",
+    )
+
+    # ==========================================================================
+    # Browser Automation Settings (CDP)
+    # ==========================================================================
+    CHROME_CDP_URL: str = Field(
+        default="http://localhost:9222",
+        description="Chrome DevTools Protocol URL for browser automation",
+    )
+
+    # ==========================================================================
+    # Colnect Settings
+    # ==========================================================================
+    COLNECT_BASE_URL: str = Field(
+        default="https://colnect.com",
+        description="Colnect base URL",
+    )
+    DEFAULT_THEMES: str = Field(
+        default="Space,Space Traveling,Astronomy,Rockets,Satellites,Scientists",
+        description="Default stamp themes to scrape (comma-separated)",
+    )
+
+    # ==========================================================================
+    # API Keys (from .env.keys)
+    # ==========================================================================
+    SUPABASE_URL: Optional[str] = Field(
+        default=None,
+        description="Supabase project URL",
+    )
+    SUPABASE_KEY: Optional[str] = Field(
+        default=None,
+        description="Supabase service role key",
+    )
+    OPENAI_API_KEY: Optional[str] = Field(
+        default=None,
+        description="OpenAI API key for embeddings",
+    )
+    GROQ_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Groq API key for vision",
+    )
+
+    # ==========================================================================
+    # Logging Settings
+    # ==========================================================================
+    LOG_LEVEL: str = Field(
+        default="INFO",
+        description="Logging level (DEBUG, INFO, WARNING, ERROR)",
+    )
     LOG_FORMAT: str = Field(
-        default="%(asctime)s - %(name)s - %(levelname)s - %(message)s [%(funcName)s:%(lineno)d]",
+        default="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
         description="Log message format",
     )
-    LOG_MAX_SIZE_MB: int = Field(default=2, description="Maximum log file size in MB before rotation")
-    LOG_BACKUP_COUNT: int = Field(default=5, description="Number of backup log files to keep")
-    LOG_FILE_NAME: str = Field(default="app.log", description="Main application log filename")
-    LOG_ERROR_FILE_NAME: str = Field(default="errors.log", description="Error log filename")
-
-    # Image settings
-    IMAGE_DOWNLOAD_TIMEOUT: int = Field(default=60, description="Image download timeout in seconds")
-    IMAGE_DOWNLOAD_MAX_RETRIES: int = Field(default=3, description="Maximum retry attempts for failed image downloads")
-    IMAGE_DOWNLOAD_RETRY_DELAY: float = Field(default=2.0, description="Initial delay between retries in seconds")
-    IMAGE_DOWNLOAD_RETRY_BACKOFF: float = Field(default=2.0, description="Backoff multiplier for retry delays")
-    IMAGE_OUTPUT_DIR: str = Field(default="images", description="Subdirectory for images")
-    IMAGE_SCALE: float = Field(default=1.0, description="Scale factor for images (1.0 = original size)")
-
-    # Enhancement settings (Upscayl)
-    UPSCAYL_PATH: str = Field(
-        default="C:\\Program Files\\Upscayl\\resources\\bin\\upscayl-bin.exe",
-        description="Path to Upscayl binary",
+    LOG_DIR: str = Field(
+        default="data/logs",
+        description="Directory for log files",
     )
-    UPSCAYL_SCALE: int = Field(default=4, description="Upscale factor (2 or 4)")
-    UPSCAYL_MODEL: str = Field(default="realesrgan-x4plus", description="Upscayl model name")
-    UPSCAYL_GPU_ID: str = Field(default="auto", description="GPU device(s) to use (auto, 0, 0,1 for multi-GPU)")
-    UPSCAYL_THREADS: str = Field(default="1:2:2", description="Thread count for load:proc:save")
-    ENHANCE_IMAGES: bool = Field(default=True, description="Enable image enhancement")
-    ENHANCE_WORKERS: int = Field(default=2, description="Number of parallel enhancement workers")
-    ENHANCE_TIMEOUT: int = Field(default=180, description="Enhancement timeout per image in seconds")
-
-    # QR Code settings
-    QRCODE_SCALE: float = Field(default=1.0, description="Scale factor for QR codes (1.0 = original size)")
-
-    # Translation settings
-    TRANSLATE_ENABLED: bool = Field(default=True, description="Enable Dutch translation")
-    TRANSLATION_PROVIDER: str = Field(default="google", description="Translation provider: 'google' or 'deepl'")
-    TRANSLATION_SOURCE: str = Field(default="en", description="Source language")
-    TRANSLATION_TARGET: str = Field(default="nl", description="Target language (Dutch)")
-    DEEPL_API_KEY: str = Field(default="", description="DeepL API key (required if using deepl provider)")
-
-    # MakeCode settings
-    MAKECODE_LANGUAGE: str = Field(default="nl", description="Language for MakeCode screenshots")
-    MAKECODE_TIMEOUT: int = Field(default=30000, description="MakeCode page load timeout in ms")
-    MAKECODE_REPLACE_ENABLED: bool = Field(
-        default=True, description="Enable MakeCode screenshot replacement"
+    LOG_MAX_SIZE_MB: int = Field(
+        default=10,
+        description="Maximum log file size in MB before rotation",
+    )
+    LOG_BACKUP_COUNT: int = Field(
+        default=3,
+        description="Number of backup log files to keep",
+    )
+    LOG_FILE_NAME: str = Field(
+        default="stamp-tools.log",
+        description="Main application log filename",
+    )
+    LOG_ERROR_FILE_NAME: str = Field(
+        default="errors.log",
+        description="Error log filename",
     )
 
-    # Print/PDF settings
-    PDF_PAGE_SIZE: str = Field(default="A4", description="PDF page size")
-    PDF_PAGE_ORIENTATION: str = Field(default="portrait", description="PDF page orientation")
-    PDF_MARGIN: str = Field(default="15mm 20mm", description="PDF page margins")
-    PDF_CONSTRUCTION_PER_PAGE: int = Field(
-        default=2, description="Number of construction diagrams per page"
-    )
-
-    # Computed properties for full paths
+    # ==========================================================================
+    # Computed Properties
+    # ==========================================================================
     @computed_field
     @property
-    def output_path(self) -> Path:
-        """Full path to output directory (OUTPUT_ROOT_DIR / OUTPUT_DIR)."""
-        return Path(self.OUTPUT_ROOT_DIR) / self.OUTPUT_DIR
-
-    @computed_field
-    @property
-    def cache_path(self) -> Path:
-        """Full path to cache directory (OUTPUT_ROOT_DIR / CACHE_DIR)."""
-        return Path(self.OUTPUT_ROOT_DIR) / self.CACHE_DIR
+    def database_path(self) -> Path:
+        """Full path to SQLite database."""
+        return Path(self.DATABASE_PATH)
 
     @computed_field
     @property
     def log_path(self) -> Path:
-        """Full path to log directory (OUTPUT_ROOT_DIR / LOG_DIR)."""
-        return Path(self.OUTPUT_ROOT_DIR) / self.LOG_DIR
+        """Full path to log directory."""
+        return Path(self.LOG_DIR)
+
+    @computed_field
+    @property
+    def yolo_model_path(self) -> Path:
+        """Full path to YOLO model."""
+        return Path(self.YOLO_MODEL_PATH)
+
+    @computed_field
+    @property
+    def vision_prompt_path(self) -> Path:
+        """Full path to vision prompt template."""
+        return Path(self.VISION_PROMPT_FILE)
+
+    @computed_field
+    @property
+    def themes_list(self) -> list[str]:
+        """Default themes as a list."""
+        return [t.strip() for t in self.DEFAULT_THEMES.split(",")]
+
+    def validate_api_keys(self) -> dict[str, bool]:
+        """Check which API keys are configured."""
+        return {
+            "supabase": bool(self.SUPABASE_URL and self.SUPABASE_KEY),
+            "openai": bool(self.OPENAI_API_KEY),
+            "groq": bool(self.GROQ_API_KEY),
+        }
 
 
 # Singleton pattern for settings
@@ -117,3 +241,9 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+def reset_settings() -> None:
+    """Reset settings singleton (useful for testing)."""
+    global _settings
+    _settings = None
