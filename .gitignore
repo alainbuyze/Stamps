@@ -89,3 +89,4 @@ Thumbs.db
 # Checkpoint files
 *.checkpoint
 *.checkpoint.json
+nul
