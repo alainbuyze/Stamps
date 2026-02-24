@@ -374,75 +374,98 @@ class ColnectScraper:
 
     def _extract_country(self, soup: BeautifulSoup, url: str = "") -> str:
         """Extract issuing country from page."""
-        # Method 1: Look for country link
-        country_elem = soup.find("a", href=re.compile(r"/stamps/country/"))
-        if country_elem:
-            return country_elem.get_text(strip=True)
+        # Method 1: Extract from URL - MOST reliable for Colnect URLs
+        # URL format: /stamp/ID-Title-Series-Country (with underscores)
+        # Example: /stamp/324257-First_Manned_Flight-Man_In_Space_Issue-Ascension_Island
+        if url and "/stamp/" in url:
+            parts = url.rstrip("/").split("-")
+            if len(parts) >= 2:
+                # Last part is always country with underscores
+                country = parts[-1].replace("_", " ")
+                if country and len(country) > 2:
+                    logger.debug(f"Extracted country from URL: {country}")
+                    return country
 
-        # Method 2: Try metadata table with various labels
+        # Method 2: Look for country link with /list/country/ pattern
+        # This is specific to the country field in Colnect
+        country_link = soup.find("a", href=re.compile(r"/list/country/\d+"))
+        if country_link:
+            country = country_link.get_text(strip=True)
+            logger.debug(f"Extracted country from link: {country}")
+            return country
+
+        # Method 3: Look for "Country:" row in metadata table
         for row in soup.find_all("tr"):
             th = row.find("th")
             td = row.find("td")
             if th and td:
-                label = th.get_text(strip=True).lower()
-                if any(x in label for x in ["country", "issuer", "territory"]):
-                    # Get text from link if present, otherwise direct text
+                label = th.get_text(strip=True).lower().strip()
+                if label in ["country:", "country"]:
                     link = td.find("a")
                     if link:
                         return link.get_text(strip=True)
                     return td.get_text(strip=True)
 
-        # Method 3: Extract from URL - last segment often contains country
-        # URL format: /stamp/ID-Name-Series-Country (with underscores)
-        if url:
-            parts = url.rstrip("/").split("-")
-            if len(parts) >= 2:
-                # Last part is often country with underscores
-                country = parts[-1].replace("_", " ")
-                if country and len(country) > 2:
-                    return country
-
-        # Method 4: Look in page text for "Issued by:" pattern
-        text = soup.get_text()
-        match = re.search(r"(?:issued by|country)[:\s]+([A-Za-z\s]+)", text, re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-
         raise ExtractionError("Cannot extract country")
 
     def _extract_year(self, soup: BeautifulSoup) -> int:
         """Extract year of issue from page."""
-        # Method 1: Look for "Issued on: YYYY-MM-DD" pattern in metadata
+        # Method 1: Look for "Issued on:" row specifically (most reliable for Colnect)
+        # The date is often a link like <a href="...">1971-02-15</a>
         for row in soup.find_all("tr"):
             th = row.find("th")
             td = row.find("td")
             if th and td:
                 label = th.get_text(strip=True).lower()
-                if any(x in label for x in ["year", "issued", "date", "release"]):
+                if "issued" in label:
+                    # Try link text first (Colnect puts date in a link)
+                    link = td.find("a")
+                    if link:
+                        text = link.get_text(strip=True)
+                        match = re.search(r"(19|20)\d{2}", text)
+                        if match:
+                            return int(match.group())
+                    # Fall back to full td text
                     text = td.get_text(strip=True)
-                    # Match YYYY-MM-DD or just YYYY
-                    match = re.search(r"\b(19|20)\d{2}\b", text)
+                    match = re.search(r"(19|20)\d{2}", text)
                     if match:
                         return int(match.group())
 
-        # Method 2: Search entire page for date patterns
-        text = soup.get_text()
+        # Method 2: Look for other date-related rows
+        for row in soup.find_all("tr"):
+            th = row.find("th")
+            td = row.find("td")
+            if th and td:
+                label = th.get_text(strip=True).lower()
+                if any(x in label for x in ["year", "date", "release"]):
+                    text = td.get_text(strip=True)
+                    match = re.search(r"(19|20)\d{2}", text)
+                    if match:
+                        return int(match.group())
 
-        # Pattern: "Issued on: 1971-02-15" or "Issue date: 1971"
+        # Method 3: Look for date links anywhere on the page
+        # Colnect links dates to list pages: /list/year/1971
+        for link in soup.find_all("a", href=re.compile(r"/list/year/")):
+            text = link.get_text(strip=True)
+            match = re.search(r"(19|20)\d{2}", text)
+            if match:
+                return int(match.group())
+
+        # Method 4: Search entire page for date patterns
+        text = soup.get_text()
         patterns = [
             r"issued\s+on[:\s]+(\d{4})",
             r"issue\s+date[:\s]+(\d{4})",
             r"year\s+of\s+issue[:\s]+(\d{4})",
             r"(\d{4})-\d{2}-\d{2}",  # ISO date format
-            r"(?:19|20)\d{2}",  # Any 4-digit year
         ]
 
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 year_str = match.group(1) if match.lastindex else match.group()
-                year = int(year_str[:4])  # Take first 4 digits
-                if 1840 <= year <= 2030:  # Reasonable stamp year range
+                year = int(year_str[:4])
+                if 1840 <= year <= 2030:
                     return year
 
         raise ExtractionError("Cannot extract year")
