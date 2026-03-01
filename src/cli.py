@@ -866,6 +866,207 @@ def identify_image(path: str, add_to_colnect: bool, save_annotated: str, non_int
 
 
 # =============================================================================
+# Review Command Group
+# =============================================================================
+
+
+@cli.group()
+def review() -> None:
+    """Review scan sessions and missed stamps."""
+    pass
+
+
+@review.command("sessions")
+@click.option("--limit", default=10, help="Number of sessions to show")
+def review_sessions(limit: int) -> None:
+    """List recent scan sessions.
+
+    Example:
+        stamp-tools review sessions
+        stamp-tools review sessions --limit 20
+    """
+    from pathlib import Path as PathLib
+    from src.feedback.session_manager import SessionManager
+    from src.feedback.console import display_session_list
+
+    settings = get_settings()
+
+    console.print(Panel("Recent Scan Sessions", style="bold blue"))
+
+    try:
+        session_manager = SessionManager(
+            output_dir=PathLib(settings.FEEDBACK_OUTPUT_DIR),
+        )
+        sessions = session_manager.list_sessions()
+
+        if not sessions:
+            console.print("[dim]No sessions found.[/dim]")
+            console.print("[dim]Run 'stamp-tools identify camera' or 'stamp-tools identify image' to create sessions.[/dim]")
+            return
+
+        display_session_list(sessions, console, limit=limit)
+
+    except Exception as e:
+        console.print(f"[red]Failed to list sessions: {e}[/red]")
+        sys.exit(1)
+
+
+@review.command("session")
+@click.argument("session_id")
+@click.option("--open-image", is_flag=True, help="Open annotated image in default viewer")
+def review_session(session_id: str, open_image: bool) -> None:
+    """View details of a specific session.
+
+    Example:
+        stamp-tools review session 20260301_143052_abc123
+        stamp-tools review session 20260301_143052_abc123 --open-image
+    """
+    from pathlib import Path as PathLib
+    from src.feedback.session_manager import SessionManager
+
+    settings = get_settings()
+
+    console.print(Panel(f"Session: {session_id}", style="bold blue"))
+
+    try:
+        session_manager = SessionManager(
+            output_dir=PathLib(settings.FEEDBACK_OUTPUT_DIR),
+        )
+        session_data = session_manager.load_session(session_id)
+
+        if not session_data:
+            console.print(f"[red]Session not found: {session_id}[/red]")
+            sys.exit(1)
+
+        # Display session info
+        table = Table(show_header=False, box=None)
+        table.add_column("Key", style="bold")
+        table.add_column("Value")
+
+        table.add_row("Session ID", session_data["session_id"])
+        table.add_row("Timestamp", session_data["timestamp"])
+        table.add_row("Source", session_data["source"])
+        if session_data.get("source_path"):
+            table.add_row("Source Path", session_data["source_path"])
+
+        console.print(table)
+        console.print()
+
+        # Summary
+        summary = session_data.get("summary", {})
+        console.print("[bold]Summary:[/bold]")
+        console.print(f"  Total shapes: {summary.get('total_shapes', 0)}")
+        console.print(f"  [green]Identified:[/green] {summary.get('identified', 0)}")
+        console.print(f"  [orange1]No match:[/orange1] {summary.get('no_match', 0)}")
+        console.print(f"  [red]Rejected:[/red] {summary.get('rejected', 0)}")
+        console.print()
+
+        # Detections
+        detections = session_data.get("detections", [])
+        if detections:
+            console.print("[bold]Detections:[/bold]")
+            det_table = Table(show_header=True)
+            det_table.add_column("#", style="dim", width=4)
+            det_table.add_column("Status", width=12)
+            det_table.add_column("Shape", width=12)
+            det_table.add_column("Confidence", width=10)
+            det_table.add_column("Match", width=20)
+
+            for i, det in enumerate(detections):
+                status = det.get("status", "?")
+                status_style = {
+                    "identified": "green",
+                    "no_match": "orange1",
+                    "rejected": "red",
+                }.get(status, "white")
+
+                match_info = det.get("rag_top_match") or det.get("stage_1b_reason") or "-"
+                confidence = det.get("rag_confidence") or det.get("stage_1b_confidence", 0)
+
+                det_table.add_row(
+                    str(i + 1),
+                    f"[{status_style}]{status}[/{status_style}]",
+                    det.get("shape_type", "?"),
+                    f"{confidence:.1%}" if confidence else "-",
+                    match_info[:20]
+                )
+
+            console.print(det_table)
+
+        # Show paths
+        session_path = PathLib(settings.FEEDBACK_OUTPUT_DIR) / "sessions" / session_id
+        console.print()
+        console.print(f"[dim]Session path: {session_path}[/dim]")
+
+        annotated_path = session_manager.get_session_annotated_path(session_id)
+        if annotated_path:
+            console.print(f"[dim]Annotated image: {annotated_path}[/dim]")
+
+            if open_image:
+                import subprocess
+                subprocess.Popen(["start", "", str(annotated_path)], shell=True)
+                console.print("[green]Opened annotated image.[/green]")
+
+    except Exception as e:
+        console.print(f"[red]Failed to load session: {e}[/red]")
+        sys.exit(1)
+
+
+@review.command("missed")
+@click.option("--limit", default=20, help="Number of stamps to show")
+def review_missed(limit: int) -> None:
+    """Review stamps needing re-ingestion.
+
+    Shows stamps that were detected but not matched in RAG.
+    These need manual review and addition to the catalog.
+
+    Example:
+        stamp-tools review missed
+    """
+    from pathlib import Path as PathLib
+    from src.feedback.session_manager import SessionManager
+    from src.feedback.console import display_missed_stamps_list
+
+    settings = get_settings()
+
+    console.print(Panel("Missed Stamps Queue", style="bold blue"))
+
+    try:
+        session_manager = SessionManager(
+            output_dir=PathLib(settings.FEEDBACK_OUTPUT_DIR),
+        )
+        missed_paths = session_manager.get_missed_stamps()
+
+        if not missed_paths:
+            console.print("[green]No stamps pending review![/green]")
+            console.print("[dim]All detected stamps have been matched or resolved.[/dim]")
+            return
+
+        # Build info list
+        stamps = []
+        for path in missed_paths[:limit]:
+            info = session_manager.get_missed_stamp_info(path)
+            stamps.append(info)
+
+        display_missed_stamps_list(stamps, console)
+
+        if len(missed_paths) > limit:
+            console.print(f"\n[dim]... and {len(missed_paths) - limit} more stamps[/dim]")
+
+        console.print()
+        console.print("[bold]Next steps:[/bold]")
+        console.print("  1. Review the stamp images in the missed_stamps directory")
+        console.print("  2. Find the stamps in Colnect and add them to your catalog")
+        console.print("  3. After adding to the catalog, re-run RAG indexing")
+        console.print()
+        console.print(f"[dim]Missed stamps directory: {session_manager.missed_dir}[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Failed to list missed stamps: {e}[/red]")
+        sys.exit(1)
+
+
+# =============================================================================
 # Train Command Group
 # =============================================================================
 

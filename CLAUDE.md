@@ -13,7 +13,7 @@ An AI-powered CLI application to manage a space-themed stamp collection: build a
 - **Vector Database:** Supabase + pgvector
 - **Embeddings:** OpenAI text-embedding-3-small
 - **Vision/Description:** Groq API (llama-3.2-11b-vision, configurable)
-- **Object Detection:** YOLOv8 (Ultralytics)
+- **Object Detection:** OpenCV (primary) + YOLOv8 (fallback)
 - **Web Scraping:** Playwright + BeautifulSoup4
 - **Browser Automation:** Playwright CDP (Chrome DevTools Protocol)
 - **Image Processing:** Pillow, OpenCV
@@ -51,8 +51,20 @@ src/
 ├── vision/                       # Computer vision module
 │   ├── __init__.py
 │   ├── camera.py                 # OpenCV camera capture
-│   ├── detector.py               # YOLOv8 stamp detection
-│   └── describer.py              # Groq vision API descriptions
+│   ├── describer.py              # Groq vision API descriptions
+│   └── detection/                # Two-stage detection pipeline
+│       ├── __init__.py
+│       ├── polygon_detector.py   # Stage 1A: Classical CV
+│       ├── stamp_classifier.py   # Stage 1B: Heuristic filter
+│       ├── yolo_detector.py      # Stage 1C: YOLO fallback
+│       └── pipeline.py           # Orchestration
+│
+├── feedback/                     # Scan feedback & visualization
+│   ├── __init__.py
+│   ├── models.py                 # DetectionFeedback, ScanSession
+│   ├── visualizer.py             # Annotated image generator
+│   ├── session_manager.py        # Session persistence
+│   └── console.py                # Rich console output
 │
 ├── identification/               # Stamp identification module
 │   ├── __init__.py
@@ -75,7 +87,7 @@ config/
 └── llava_prompt.txt              # Configurable vision prompt template
 
 models/                           # YOLO weights (gitignored, auto-downloaded)
-data/                             # SQLite DB + logs (gitignored)
+data/                             # SQLite DB + logs + sessions (gitignored)
 tests/                            # Test files
 guides/                           # Development documentation
 ```
@@ -146,6 +158,19 @@ uv run stamp-tools identify image --path "C:\path\to\photo.jpg"
 uv run stamp-tools identify camera --add-to-colnect
 ```
 
+### Review & Feedback
+
+```powershell
+# Review missed stamps (no RAG match)
+uv run stamp-tools review missed
+
+# List recent scan sessions
+uv run stamp-tools review sessions
+
+# Open specific session details
+uv run stamp-tools review session <session_id>
+```
+
 ### LASTDODO Migration
 
 ```powershell
@@ -201,27 +226,28 @@ DATABASE_PATH=data/stamps.db
 
 # Scraping
 SCRAPE_DELAY_SECONDS=1.5
-SCRAPE_RETRY_COUNT=3
 SCRAPE_ERROR_BEHAVIOR=skip
 
 # RAG
 RAG_MATCH_AUTO_THRESHOLD=0.9
 RAG_MATCH_MIN_THRESHOLD=0.5
-EMBEDDING_MODEL=text-embedding-3-small
 
 # Vision - Groq
 GROQ_MODEL=llama-3.2-11b-vision-preview
-GROQ_RATE_LIMIT_PER_MINUTE=30
 
-# Object Detection
-YOLO_MODEL_PATH=models/yolov8n.pt
-YOLO_CONFIDENCE_THRESHOLD=0.5
+# Detection (Two-Stage)
+DETECTION_MODE=album
+DETECTION_MIN_VERTICES=3
+DETECTION_MAX_VERTICES=4
+CLASSIFIER_CONFIDENCE_THRESHOLD=0.6
+DETECTION_FALLBACK_TO_YOLO=true
+
+# Feedback
+FEEDBACK_SAVE_ANNOTATED=true
+FEEDBACK_SAVE_CROPS=true
 
 # Browser Automation
 CHROME_CDP_URL=http://localhost:9222
-
-# Logging
-LOG_LEVEL=INFO
 ```
 
 ### Secrets (.env.keys)
@@ -232,8 +258,6 @@ SUPABASE_KEY=your-service-role-key
 OPENAI_API_KEY=sk-xxxxx
 GROQ_API_KEY=gsk_xxxxx
 ```
-
-
 
 ## Code Conventions
 
@@ -255,8 +279,7 @@ settings = get_settings()
 
 # ✅ GOOD - Cross-platform
 db_path = Path(settings.DATABASE_PATH)
-model_path = Path(settings.YOLO_MODEL_PATH)
-output_dir = Path("data") / "output"
+output_dir = Path("data") / "sessions"
 
 # ❌ BAD - Windows-specific hardcoding
 db_path = "data\\stamps.db"
@@ -275,24 +298,97 @@ except Exception as e:
     raise ScrapingError(f"Failed to scrape {url}") from e
 ```
 
-### Logging Pattern
+## Detection Architecture (Two-Stage)
+
+The stamp detection uses a two-stage pipeline optimized for album pages:
+
+### Stage 1A: Classical CV Polygon Detection
+
+Uses OpenCV for efficient, training-free detection:
 
 ```python
-import logging
-logger = logging.getLogger(__name__)
-
-# Function entry
-logger.debug(f" * scrape_stamp_page > Starting for {url}")
-
-# Operational flow
-logger.debug("    -> Extracting title and country")
-
-# Status updates
-logger.info(f"Scraped {count} stamps from {theme}")
-
-# Errors with context
-logger.error(f"Failed: {error} | URL: {url}")
+# Conceptual flow
+1. Preprocess: grayscale → blur → adaptive threshold
+2. Find contours (cv2.findContours)
+3. Approximate polygons (cv2.approxPolyDP)
+4. Filter by:
+   - Vertices: 3 (triangle) or 4 (quadrilateral)
+   - Area: reasonable stamp size
+   - Convexity: must be convex shape
+   - Aspect ratio: 0.3 to 3.0
+5. Perspective correction → clean rectangular crops
 ```
+
+**Supported shapes:**
+- Triangles (3 vertices)
+- Rectangles, squares, diamonds (4 vertices)
+- Miniature sheets detected as single items
+
+### Stage 1B: Stamp Classifier (Heuristics)
+
+Filters false positives with weighted checks:
+
+| Check | Weight | Description |
+|-------|--------|-------------|
+| Color variance | 0.35 | Stamps are colorful, not blank |
+| Edge complexity | 0.30 | Stamps have detailed content |
+| Size plausibility | 0.20 | Reasonable dimensions |
+| Perforation hint | 0.15 | Optional wavy edge pattern |
+
+Confidence threshold: **0.6** to accept as stamp.
+
+### Stage 1C: YOLO Fallback
+
+Triggered only when Stage 1A finds no candidates:
+- Pre-trained or fine-tuned YOLOv8
+- Only loaded when needed (lazy loading)
+- Configurable via `DETECTION_FALLBACK_TO_YOLO`
+
+### Stage 2: RAG Identification
+
+Clean crops from Stage 1 feed into:
+1. Groq vision → description
+2. OpenAI → embedding  
+3. Supabase → similarity search
+
+## Feedback System
+
+Every scan session produces visual feedback for review and re-ingestion:
+
+### Color Coding
+
+| Status | Color | Meaning |
+|--------|-------|---------|
+| 🟩 Identified | Green | Successfully matched in RAG |
+| 🟧 No Match | Orange | Stamp detected but not in database |
+| 🟥 Rejected | Red | Failed classifier (not a stamp) |
+| 🟪 YOLO | Purple | Detected by YOLO fallback |
+
+### Session Output Structure
+
+```
+data/
+├── sessions/
+│   └── 20260222_143052_abc123/
+│       ├── original.png          # Raw camera capture
+│       ├── annotated.png         # With colored overlays
+│       ├── session.json          # Full detection details
+│       └── crops/
+│           ├── 001_identified_AU5352.png
+│           ├── 002_no_match_unmatched.png
+│           └── 003_rejected_low_variance.png
+│
+└── missed_stamps/                # For later re-ingestion
+    └── 20260222_143052_abc123_002.png
+```
+
+### Console Output
+
+After each scan, Rich displays:
+- Summary table with counts by status
+- Detailed table of identified stamps with confidence
+- Warning panel for stamps needing review
+- Path to annotated image
 
 ## Data Model
 
@@ -337,7 +433,7 @@ When multiple conditions: MNH takes precedence, comment contains breakdown (e.g.
 stamp-tools init
     │
     ├── Create SQLite database (data/stamps.db)
-    ├── Download YOLOv8 model (models/yolov8n.pt)
+    ├── Create session directories
     ├── Verify Supabase connection
     ├── Verify Groq API key
     └── Create RAG table in Supabase
@@ -370,16 +466,25 @@ stamp-tools rag index
 stamp-tools identify camera
     │
     ├── Capture frame from camera (OpenCV)
-    ├── Detect stamps with YOLOv8 → bounding boxes
-    ├── For each detection:
-    │   ├── Crop stamp region
+    │
+    ├── Stage 1A: Polygon detection (OpenCV)
+    │   └── Find triangles + quadrilaterals
+    │
+    ├── Stage 1B: Classify each polygon
+    │   └── Accept stamps, reject non-stamps
+    │
+    ├── Stage 1C: YOLO fallback (if nothing found)
+    │
+    ├── For each accepted stamp:
     │   ├── Call Groq API → description
     │   ├── Generate embedding → search Supabase
     │   ├── If score > 90%: auto-accept
     │   └── Else: show top 3 for selection
-    ├── For confirmed matches:
-    │   └── Browser automation → add to Colnect
-    └── Display summary
+    │
+    ├── Save session (annotated image + crops + JSON)
+    │
+    └── For confirmed matches:
+        └── Browser automation → add to Colnect
 ```
 
 ### 4. Migration Pipeline
@@ -402,18 +507,6 @@ The toolset connects to an existing Chrome session via Chrome DevTools Protocol.
 ```powershell
 # Windows - Start Chrome with remote debugging
 & "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
-```
-
-### Usage in Code
-
-```python
-from playwright.sync_api import sync_playwright
-
-# Connect to existing Chrome
-browser = playwright.chromium.connect_over_cdp("http://localhost:9222")
-page = browser.contexts[0].pages[0]
-
-# User must be logged into Colnect/LASTDODO
 ```
 
 **Important:** Log into Colnect and LASTDODO manually before running automation commands.

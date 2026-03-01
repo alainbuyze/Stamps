@@ -2,10 +2,10 @@
 
 Coordinates the full identification workflow:
 1. Image capture (camera or file)
-2. Stamp detection (YOLO)
-3. Description generation (Groq vision)
-4. Similarity search (RAG)
-5. Result handling
+2. Stage 1: Two-stage detection (polygon + classifier + YOLO fallback)
+3. Stage 2: Description generation (Groq vision)
+4. Stage 3: Similarity search (RAG)
+5. Session persistence and feedback
 """
 
 import asyncio
@@ -17,17 +17,23 @@ from typing import Callable, Optional
 
 from src.core.config import get_settings
 from src.core.errors import IdentificationError
+from src.feedback.models import DetectionFeedback, ScanSession
+from src.feedback.session_manager import SessionManager
 from src.rag.search import IdentificationResult, MatchConfidence, RAGSearcher
 from src.vision.camera import CameraCapture, CapturedImage, load_image_file
 from src.vision.describer import StampDescriber
-from src.vision.detector import DetectedStamp, DetectionResult, SimpleStampDetector, StampDetector
+from src.vision.detection.pipeline import (
+    DetectionPipeline,
+    DetectedStamp,
+    create_pipeline_from_env,
+)
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class StampIdentification:
-    """Result of identifying a single detected stamp."""
+    """Result of identifying a single detected stamp (for backwards compatibility)."""
 
     stamp: DetectedStamp
     description: str
@@ -52,21 +58,21 @@ class StampIdentification:
 
 @dataclass
 class IdentificationBatch:
-    """Result of identifying multiple stamps from an image."""
+    """Result of identifying multiple stamps from an image (for backwards compatibility)."""
 
     source_image: CapturedImage
-    detection_result: DetectionResult
+    session: ScanSession
     identifications: list[StampIdentification] = field(default_factory=list)
 
     @property
     def total_detected(self) -> int:
         """Total number of stamps detected."""
-        return self.detection_result.count
+        return self.session.summary["total_shapes"]
 
     @property
     def total_identified(self) -> int:
         """Number of stamps successfully identified."""
-        return sum(1 for i in self.identifications if i.is_success)
+        return self.session.summary["identified"]
 
     @property
     def auto_matches(self) -> list[StampIdentification]:
@@ -91,28 +97,37 @@ class IdentificationBatch:
             if i.confidence == MatchConfidence.NO_MATCH
         ]
 
+    # For backwards compatibility with CLI
+    @property
+    def detection_result(self):
+        """Backwards compatibility shim."""
+        return self
+
 
 class StampIdentifier:
-    """Orchestrates the stamp identification pipeline."""
+    """Orchestrates the stamp identification pipeline with two-stage detection."""
 
     def __init__(
         self,
-        detector: Optional[StampDetector | SimpleStampDetector] = None,
+        pipeline: Optional[DetectionPipeline] = None,
         describer: Optional[StampDescriber] = None,
         searcher: Optional[RAGSearcher] = None,
-        detector_type: str = "auto",
+        session_manager: Optional[SessionManager] = None,
+        detector_type: str = "auto",  # Kept for backwards compatibility
     ):
         """Initialize the identifier.
 
         Args:
-            detector: Detector instance (creates new based on detector_type if not provided)
+            pipeline: DetectionPipeline instance (creates from env if not provided)
             describer: StampDescriber instance (creates new if not provided)
             searcher: RAGSearcher instance (creates new if not provided)
-            detector_type: Detection method - "yolo", "contour", or "auto"
+            session_manager: SessionManager instance (creates new if not provided)
+            detector_type: Detection method - kept for backwards compatibility
         """
-        self.detector = detector
+        self.pipeline = pipeline
         self.describer = describer
         self.searcher = searcher
+        self.session_manager = session_manager
         self.detector_type = detector_type
         self._initialized = False
 
@@ -121,16 +136,21 @@ class StampIdentifier:
         if self._initialized:
             return
 
-        if self.detector is None:
-            if self.detector_type == "contour":
-                self.detector = SimpleStampDetector()
-            else:
-                # "yolo" or "auto" - use YOLO with fallback
-                self.detector = StampDetector()
+        settings = get_settings()
+
+        if self.pipeline is None:
+            self.pipeline = create_pipeline_from_env()
         if self.describer is None:
             self.describer = StampDescriber()
         if self.searcher is None:
             self.searcher = RAGSearcher()
+        if self.session_manager is None:
+            self.session_manager = SessionManager(
+                output_dir=settings.feedback_output_path,
+                save_original=settings.FEEDBACK_SAVE_ORIGINAL,
+                save_annotated=settings.FEEDBACK_SAVE_ANNOTATED,
+                save_crops=settings.FEEDBACK_SAVE_CROPS,
+            )
 
         self._initialized = True
 
@@ -156,61 +176,112 @@ class StampIdentifier:
         logger.info(f"Starting identification for {image.source}")
 
         try:
-            # Step 1: Detect stamps
+            # Step 1: Create session
+            session = ScanSession(
+                source="file" if image.source != "camera" else "camera",
+                source_path=image.source if image.source != "camera" else None,
+                original_image=image.frame,
+            )
+
+            # Step 2: Detect stamps using two-stage pipeline
             if progress_callback:
                 progress_callback(0, 0, "Detecting stamps...")
 
-            detection_result = self.detector.detect(image)
+            accepted_stamps, rejected_stamps = self.pipeline.detect_stamps(image.frame)
 
-            if detection_result.count == 0:
+            if len(accepted_stamps) == 0 and len(rejected_stamps) == 0:
                 logger.info("No stamps detected in image")
                 return IdentificationBatch(
                     source_image=image,
-                    detection_result=detection_result,
+                    session=session,
                 )
 
-            logger.info(f"Detected {detection_result.count} stamps")
+            logger.info(f"Detected {len(accepted_stamps)} stamps, {len(rejected_stamps)} rejected")
 
-            # Step 2: Process each detected stamp
-            batch = IdentificationBatch(
-                source_image=image,
-                detection_result=detection_result,
-            )
+            # Step 3: Add rejected stamps to session (no RAG search needed)
+            for stamp in rejected_stamps:
+                feedback = self._create_feedback_from_stamp(stamp, searched=False)
+                session.detections.append(feedback)
 
-            total = detection_result.count
+            # Step 4: Process accepted stamps through RAG
+            identifications = []
+            total = len(accepted_stamps)
 
-            for idx, stamp in enumerate(detection_result.stamps):
+            for idx, stamp in enumerate(accepted_stamps):
                 if progress_callback:
-                    progress_callback(idx + 1, total, f"Processing stamp {idx + 1}/{total}")
+                    progress_callback(idx + 1, total, f"Identifying stamp {idx + 1}/{total}")
 
-                identification = await self._identify_stamp(stamp)
-                batch.identifications.append(identification)
+                feedback, identification = await self._identify_stamp(stamp)
+                session.detections.append(feedback)
+                if identification:
+                    identifications.append(identification)
+
+            # Step 5: Save session
+            session_path = self.session_manager.save_session(session)
+            logger.info(f"Session saved to {session_path}")
 
             logger.info(
-                f"Identification complete: {batch.total_identified}/{batch.total_detected} identified"
+                f"Identification complete: {session.summary['identified']}/{total} identified"
             )
 
-            return batch
+            return IdentificationBatch(
+                source_image=image,
+                session=session,
+                identifications=identifications,
+            )
 
         except Exception as e:
             error_msg = f"Identification failed: {e}"
             logger.error(error_msg)
             raise IdentificationError(error_msg) from e
 
-    async def _identify_stamp(self, stamp: DetectedStamp) -> StampIdentification:
+    def _create_feedback_from_stamp(
+        self,
+        stamp: DetectedStamp,
+        searched: bool = False,
+    ) -> DetectionFeedback:
+        """Convert DetectedStamp to DetectionFeedback."""
+        return DetectionFeedback(
+            detection_id=stamp.detection_id,
+            shape_type=stamp.shape_type,
+            bounding_box=stamp.bounding_box,
+            vertices=stamp.vertices,
+            stage_1b_passed=stamp.classifier_passed,
+            stage_1b_confidence=stamp.classifier_confidence,
+            stage_1b_reason=stamp.classifier_reason,
+            stage_1b_details=stamp.classifier_details,
+            stage_2_searched=searched,
+            cropped_image=stamp.cropped_image,
+        )
+
+    async def _identify_stamp(
+        self,
+        stamp: DetectedStamp,
+    ) -> tuple[DetectionFeedback, Optional[StampIdentification]]:
         """Identify a single detected stamp.
 
         Args:
             stamp: DetectedStamp to identify
 
         Returns:
-            StampIdentification with results
+            Tuple of (DetectionFeedback, StampIdentification or None)
         """
-        logger.debug(f" * _identify_stamp > Processing stamp {stamp.index}")
+        logger.debug(f" * _identify_stamp > Processing stamp {stamp.detection_id}")
+
+        feedback = self._create_feedback_from_stamp(stamp, searched=True)
 
         try:
             # Generate description via Groq vision
-            image_bytes = stamp.to_bytes(format="JPEG")
+            from io import BytesIO
+            from PIL import Image
+            import cv2
+
+            # Convert crop to bytes
+            rgb_frame = cv2.cvtColor(stamp.cropped_image, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(rgb_frame)
+            buffer = BytesIO()
+            pil_img.save(buffer, format="JPEG")
+            image_bytes = buffer.getvalue()
             image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
             description = await self.describer.describe_from_base64(
@@ -225,25 +296,34 @@ class StampIdentifier:
                 top_k=3,
             )
 
-            return StampIdentification(
+            # Update feedback with RAG results
+            feedback.rag_match_found = rag_result.has_match
+            if rag_result.top_matches:
+                feedback.rag_top_match = rag_result.top_matches[0].entry.colnect_id
+                feedback.rag_confidence = rag_result.top_matches[0].score
+                feedback.rag_top_3 = [
+                    {
+                        "colnect_id": m.entry.colnect_id,
+                        "score": m.score,
+                        "country": m.entry.country,
+                        "year": m.entry.year,
+                    }
+                    for m in rag_result.top_matches
+                ]
+
+            identification = StampIdentification(
                 stamp=stamp,
                 description=description,
                 rag_result=rag_result,
             )
 
+            return feedback, identification
+
         except Exception as e:
-            logger.error(f"Failed to identify stamp {stamp.index}: {e}")
-            # Return error result
-            return StampIdentification(
-                stamp=stamp,
-                description="",
-                rag_result=IdentificationResult(
-                    query_description="",
-                    top_matches=[],
-                    confidence=MatchConfidence.NO_MATCH,
-                ),
-                error=str(e),
-            )
+            logger.error(f"Failed to identify stamp {stamp.detection_id}: {e}")
+            # Return error feedback
+            feedback.stage_1b_reason = f"identification_error: {str(e)}"
+            return feedback, None
 
     async def identify_from_camera(
         self,
@@ -314,19 +394,17 @@ class StampIdentifier:
             Dict mapping component name to ready status
         """
         status = {
-            "YOLO model": False,
+            "Detection pipeline": False,
             "Groq API": False,
             "RAG search": False,
         }
 
-        # Check YOLO
+        # Check detection pipeline
         try:
-            settings = get_settings()
-            yolo_path = Path(settings.YOLO_MODEL_PATH)
-            # Model can be auto-downloaded, so just check if path is configured
-            status["YOLO model"] = True
+            # Pipeline should always be available (uses built-in CV)
+            status["Detection pipeline"] = True
         except Exception as e:
-            logger.debug(f"YOLO check failed: {e}")
+            logger.debug(f"Detection pipeline check failed: {e}")
 
         # Check Groq
         try:

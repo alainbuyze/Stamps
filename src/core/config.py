@@ -108,6 +108,102 @@ class Settings(BaseSettings):
         default=0.5,
         description="Minimum confidence for stamp detection (0-1)",
     )
+    YOLO_AUTO_DOWNLOAD: bool = Field(
+        default=True,
+        description="Auto-download YOLO model if not found",
+    )
+
+    # ==========================================================================
+    # Detection Pipeline Settings
+    # ==========================================================================
+    DETECTION_MODE: str = Field(
+        default="album",
+        description="Detection mode: album | loose | mixed",
+    )
+    DETECTION_MIN_VERTICES: int = Field(
+        default=3,
+        description="Minimum vertices for polygon detection (3=triangles)",
+    )
+    DETECTION_MAX_VERTICES: int = Field(
+        default=4,
+        description="Maximum vertices for polygon detection (4=quads)",
+    )
+    DETECTION_MIN_AREA_RATIO: float = Field(
+        default=0.001,
+        description="Minimum area as ratio of image (0.1%)",
+    )
+    DETECTION_MAX_AREA_RATIO: float = Field(
+        default=0.15,
+        description="Maximum area as ratio of image (15%)",
+    )
+    DETECTION_ASPECT_RATIO_MIN: float = Field(
+        default=0.3,
+        description="Minimum aspect ratio for stamps",
+    )
+    DETECTION_ASPECT_RATIO_MAX: float = Field(
+        default=3.0,
+        description="Maximum aspect ratio for stamps",
+    )
+    DETECTION_APPROX_EPSILON: float = Field(
+        default=0.02,
+        description="Polygon approximation epsilon",
+    )
+    DETECTION_FALLBACK_TO_YOLO: bool = Field(
+        default=True,
+        description="Use YOLO fallback when polygon detection finds nothing",
+    )
+
+    # ==========================================================================
+    # Stamp Classifier Settings
+    # ==========================================================================
+    CLASSIFIER_MODE: str = Field(
+        default="heuristic",
+        description="Classifier mode: heuristic | model | both",
+    )
+    CLASSIFIER_CONFIDENCE_THRESHOLD: float = Field(
+        default=0.6,
+        description="Minimum confidence to accept as stamp (0-1)",
+    )
+    CLASSIFIER_COLOR_VARIANCE_WEIGHT: float = Field(
+        default=0.35,
+        description="Weight for color variance heuristic",
+    )
+    CLASSIFIER_EDGE_COMPLEXITY_WEIGHT: float = Field(
+        default=0.30,
+        description="Weight for edge complexity heuristic",
+    )
+    CLASSIFIER_SIZE_WEIGHT: float = Field(
+        default=0.20,
+        description="Weight for size plausibility heuristic",
+    )
+    CLASSIFIER_PERFORATION_WEIGHT: float = Field(
+        default=0.15,
+        description="Weight for perforation hint heuristic",
+    )
+    CLASSIFIER_MODEL_PATH: Optional[str] = Field(
+        default=None,
+        description="Path to trained classifier model (optional)",
+    )
+
+    # ==========================================================================
+    # Feedback System Settings
+    # ==========================================================================
+    FEEDBACK_OUTPUT_DIR: str = Field(
+        default="data",
+        description="Base output directory for session data",
+    )
+    FEEDBACK_SAVE_ORIGINAL: bool = Field(
+        default=True,
+        description="Save original captured image",
+    )
+    FEEDBACK_SAVE_ANNOTATED: bool = Field(
+        default=True,
+        description="Save annotated image with overlays",
+    )
+    FEEDBACK_SAVE_CROPS: bool = Field(
+        default=True,
+        description="Save individual stamp crops",
+    )
 
     # ==========================================================================
     # Camera Settings
@@ -221,6 +317,12 @@ class Settings(BaseSettings):
     def themes_list(self) -> list[str]:
         """Default themes as a list."""
         return [t.strip() for t in self.DEFAULT_THEMES.split(",")]
+
+    @computed_field
+    @property
+    def feedback_output_path(self) -> Path:
+        """Full path to feedback output directory."""
+        return Path(self.FEEDBACK_OUTPUT_DIR)
 
     def validate_api_keys(self) -> dict[str, bool]:
         """Check which API keys are configured."""
