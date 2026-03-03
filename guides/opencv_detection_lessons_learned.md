@@ -1,8 +1,8 @@
-# OpenCV Stamp Detection: Lessons Learned
+# Stamp Detection: Lessons Learned
 
 ## Overview
 
-This document captures the various classical computer vision approaches attempted for stamp detection, their limitations, and conclusions for future development.
+This document captures the various approaches attempted for stamp detection, their limitations, and conclusions for future development. Includes both classical computer vision and Vision LLM approaches.
 
 **Test Images Used:**
 - `images (1).jpg` - 3 colorful stamps on teal background
@@ -123,6 +123,92 @@ binary = cv2.bitwise_or(binary_edge, binary_value)
 
 ---
 
+---
+
+## Vision LLM Detection Approaches
+
+After classical CV failed, Vision LLM detection was attempted using Claude and Groq APIs to detect stamp bounding boxes.
+
+### 7. Vision LLM with Percentage Coordinates
+
+**Method:**
+```python
+DETECTION_PROMPT = """Analyze this stamp album page. Detect each UNIQUE postage stamp.
+
+For EACH stamp, output a JSON object:
+{
+  "box": [x_min, y_min, x_max, y_max],  // Percentage coordinates (0-100)
+  "shape": "rectangle|triangle|diamond|irregular",
+  "confidence": "high|medium|low"
+}
+"""
+# Send preprocessed image to LLM
+# Parse JSON response
+# Convert percentage coordinates to pixels
+```
+
+**Providers Tested:**
+- Claude Haiku (`claude-3-5-haiku-20241022`)
+- Claude Sonnet 4 (`claude-sonnet-4-20250514`)
+- Groq Llama Vision (`llama-3.2-11b-vision-preview`)
+
+**Result:** All providers failed with systematic spatial offset.
+
+**Evidence from Testing (Trans-Mississippi album page):**
+
+| Provider | Stamps Detected | Spatial Accuracy | Notes |
+|----------|-----------------|------------------|-------|
+| Claude Haiku | 16 | Poor - boxes offset by ~10-20% | Boxes in grid pattern but wrong positions |
+| Claude Sonnet 4 | 15 | Poor - same offset issue | No improvement over Haiku |
+| Groq Llama | 15-16 | Poor - similar offset | Fallback produced same results |
+
+**Visual Evidence:**
+- Bounding boxes appeared in roughly correct *relative* positions to each other
+- But *absolute* positions were systematically wrong
+- Boxes were offset from actual stamps by significant margin
+- Many stamps missed entirely (especially right side and bottom of page)
+- Duplicate detections on some stamps despite NMS
+
+**Why it failed:**
+
+1. **Vision LLMs lack spatial precision** - They can SEE objects and understand relationships, but cannot accurately report pixel/percentage coordinates. This is a known limitation of current Vision LLM architectures.
+
+2. **Coordinate format confusion** - LLMs may interpret coordinate systems differently (origin position, axis direction).
+
+3. **Image preprocessing artifacts** - Downscaling for token efficiency may affect how the LLM perceives positions.
+
+4. **Attention mechanism limitations** - Transformer attention doesn't preserve precise spatial information the way CNNs do.
+
+**Session Data:**
+- Session `20260303_092013_3aaf2b`: Claude Haiku primary, misaligned boxes
+- Session `20260303_094844_f89d22`: Claude Sonnet attempted (model 404), Groq fallback
+- Session `20260303_095033_c7fb43`: Claude Sonnet 4 primary, same offset issue
+
+**Crop Quality Evidence:**
+The misaligned boxes produced crops that cut off parts of stamps:
+- *"partial view of a green-colored design"*
+- *"The provided image does not display sufficient details"*
+- *"partial view with a reddish-brown color scheme"*
+
+This confirms the bounding boxes were not properly aligned with stamp positions.
+
+---
+
+### 8. NMS (Non-Maximum Suppression) for Duplicates
+
+**Method:**
+```python
+def apply_nms(detections, iou_threshold=0.3):
+    # Sort by confidence
+    # Remove overlapping boxes where IoU > threshold
+```
+
+**Result:** Reduced duplicates but didn't fix spatial accuracy.
+
+NMS successfully removed overlapping detections when IoU threshold was set appropriately, but since the underlying coordinates were wrong, this didn't improve overall quality.
+
+---
+
 ## Fundamental Challenges
 
 ### 1. Background Variability
@@ -179,29 +265,67 @@ Classical CV methods require careful tuning of:
 
 ## Recommendations
 
-### 1. Use YOLO for Primary Detection
-The project already includes YOLO as a fallback (`yolo_detector.py`). Based on these experiments, **YOLO should be the primary detection method**, not a fallback.
+### 1. Use YOLO for Primary Detection (CONFIRMED)
 
-**Advantages of YOLO:**
+Both classical CV and Vision LLM approaches have failed. **YOLO is the only viable option** for reliable stamp detection.
+
+**Why YOLO:**
 - Learned features handle variability automatically
 - Single forward pass, no parameter tuning per image
+- Trained specifically for object localization (unlike Vision LLMs)
 - Can detect stamps regardless of color, background, or content
 - Handles occlusion and partial visibility
 - Pre-trained models available, fine-tuning straightforward
 
-### 2. Use Classical CV for Post-Processing Only
+**Approaches ruled out:**
+| Approach | Result | Reason |
+|----------|--------|--------|
+| Classical CV (Otsu, edges, etc.) | Failed | Too much variability in backgrounds/stamps |
+| Vision LLM (Claude, Groq) | Failed | Poor spatial accuracy - can see but can't localize |
+
+### 2. Training Data Options
+
+**Option A: Fine-tune YOLO from scratch**
+1. Collect ~500-1000 annotated stamp images
+2. Use labeling tool (Label Studio, CVAT, Roboflow)
+3. Include variety: colors, backgrounds, conditions, shapes
+4. Fine-tune YOLOv8 for stamp-specific detection
+5. Expected result: >95% detection accuracy
+
+**Option B: Use Roboflow**
+- Pre-trained stamp detection models may exist
+- Easy annotation interface
+- Hosted training and inference
+- Faster time to working solution
+
+**Option C: Semi-supervised approach**
+- Use corrected Vision LLM detections as training data
+- Manually fix bounding boxes, use as labels
+- Bootstrap YOLO training from corrected examples
+
+### 3. Use Vision LLM for Description Only
+
+Vision LLMs are excellent for:
+- **Describing stamp content** (themes, colors, text)
+- **Generating embeddings** for RAG search
+- **Classification** (country, era, condition)
+
+But NOT for:
+- **Spatial localization** (bounding boxes)
+- **Precise coordinates**
+
+**Recommended pipeline:**
+```
+YOLO detects stamps → Crop regions → Vision LLM describes → RAG matches
+```
+
+### 4. Use Classical CV for Post-Processing Only
 Classical CV is still useful for:
 - **Perspective correction** after YOLO detects the stamp
 - **Edge refinement** to find precise boundaries
 - **Quality assessment** (blur detection, color analysis)
 
-### 3. Fine-Tune YOLO on Stamp Dataset
-1. Collect ~500-1000 annotated stamp images
-2. Include variety: colors, backgrounds, conditions, shapes
-3. Fine-tune YOLOv8 for stamp-specific detection
-4. Expected result: >95% detection accuracy
-
-### 4. Consider Segment Anything Model (SAM)
+### 5. Consider Segment Anything Model (SAM)
 For challenging cases, SAM can provide precise segmentation:
 - Point-prompt or box-prompt based
 - Handles arbitrary shapes well
@@ -211,32 +335,84 @@ For challenging cases, SAM can provide precise segmentation:
 
 ## Conclusion
 
-**Classical OpenCV approaches are insufficient for reliable stamp detection** due to the high variability in:
-- Background colors and textures
-- Stamp colors and content
-- Border types (perforated, cut, irregular)
-- Environmental conditions (lighting, shadows, binders)
+**Both classical CV and Vision LLM approaches are insufficient for reliable stamp detection.**
 
-The time invested in tuning classical CV parameters would be better spent:
-1. Collecting training data for YOLO
-2. Fine-tuning a YOLO model
-3. Implementing a robust YOLO-based pipeline
+### Classical CV Failed Because:
+- High variability in background colors and textures
+- Stamp colors and content vary widely
+- Border types (perforated, cut, irregular) differ
+- Environmental conditions (lighting, shadows, binders) affect results
+- Parameters that work for one image fail for another
 
-**The current architecture already supports this** - `pipeline.py` orchestrates detection, and `yolo_detector.py` exists. The recommendation is to make YOLO the default and remove the classical CV dependency for primary detection.
+### Vision LLM Failed Because:
+- Transformer architectures lack precise spatial reasoning
+- Can understand "there are stamps" but cannot report accurate coordinates
+- Systematic offset in bounding boxes across all providers tested
+- Higher-capability models (Sonnet) showed no improvement over basic models (Haiku)
+- This is a fundamental architectural limitation, not a prompting issue
+
+### Path Forward: YOLO
+
+The only viable approach is **YOLO-based detection**:
+1. Collect training data (500-1000 labeled images) OR use Roboflow
+2. Fine-tune YOLOv8 for stamp detection
+3. Use Vision LLM only for description/identification (not localization)
+
+**Recommended Architecture:**
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Input      │ ──▶ │   YOLO      │ ──▶ │  Crop       │ ──▶ │ Vision LLM  │
+│  Image      │     │  Detection  │     │  Stamps     │     │ Description │
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+                          │                                        │
+                          ▼                                        ▼
+                    Bounding boxes                           RAG Search
+                    (accurate)                              (identification)
+```
+
+**Next Steps:**
+1. Research Roboflow for pre-trained stamp models
+2. If none exist, set up annotation pipeline
+3. Train custom YOLOv8 model
+4. Integrate into existing `vision_detector.py` as primary method
 
 ---
 
 ## Files Modified During Experiments
 
+### Classical CV Experiments
 - `src/vision/detection/polygon_detector.py` - Multiple iterations of preprocessing approaches
 - `test_output/debug_steps/` - Debug images from each approach
+
+### Vision LLM Experiments
+- `src/vision/vision_detector.py` - Vision LLM detection with Groq/Claude
+- `src/vision/identification_pipeline.py` - Full pipeline orchestration
+- `src/vision/preprocessing.py` - Image preprocessing for token efficiency
+- `src/core/config.py` - Configuration for detection providers
+
+### Inspection Data (Vision LLM sessions)
+- `D:\Stamps\data\inspection\20260303_092013_3aaf2b\` - Claude Haiku test
+- `D:\Stamps\data\inspection\20260303_094844_f89d22\` - Claude Sonnet attempt (404)
+- `D:\Stamps\data\inspection\20260303_095033_c7fb43\` - Claude Sonnet 4 test
 
 ## Test Commands
 
 ```powershell
-# Run detection test
+# Run classical CV detection test
 & .\.venv\Scripts\python.exe .\src\vision\detection\polygon_detector.py
 
-# Change test image in polygon_detector.py main block (line ~687)
-image_path = r"A:\Stamps\your_test_image.jpg"
+# Run Vision LLM detection
+uv run stamp-tools identify image --path "path/to/album.jpg" --mode multi
+
+# View inspection results
+uv run stamp-tools inspect sessions
+uv run stamp-tools inspect session <session_id>
+```
+
+## Configuration (for Vision LLM experiments)
+
+```env
+# .env.local
+DETECTION_PRIMARY_PROVIDER=claude_sonnet  # or groq, claude_haiku
+DETECTION_CLAUDE_MODEL_SONNET=claude-sonnet-4-20250514
 ```
