@@ -27,51 +27,72 @@ RAG_MATCH_MIN_THRESHOLD=0.5
 EMBEDDING_MODEL=text-embedding-3-small
 
 # =============================================================================
-# Vision Settings (Groq)
+# Vision LLM Detection (NEW - replaces OpenCV)
 # =============================================================================
-GROQ_MODEL=llama-3.2-11b-vision-preview
+
+# Provider configuration groq
+DETECTION_PRIMARY_PROVIDER=claude_haiku
+DETECTION_FALLBACK_PROVIDER=groq
+DETECTION_ENABLE_FALLBACK=true
+
+# Groq settings
+GROQ_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+OLD_GROQ_MODEL=llama-3.2-11b-vision-preview
 GROQ_RATE_LIMIT_PER_MINUTE=30
-VISION_PROMPT_PATH=config/llava_prompt.txt
+
+# Claude settings (fallback)
+CLAUDE_HAIKU_MODEL=claude-3-haiku-20240307
+CLAUDE_SONNET_MODEL=claude-3-5-sonnet-20241022
+
+# Fallback triggers
+DETECTION_MIN_DETECTIONS=1
+DETECTION_FALLBACK_ON_PARSE_ERROR=true
+DETECTION_FALLBACK_ON_API_ERROR=true
 
 # =============================================================================
-# Detection Settings (Two-Stage Pipeline)
+# Preprocessing Settings
 # =============================================================================
 
-# Stage 1A: Polygon Detection
-DETECTION_MODE=album
-DETECTION_MIN_VERTICES=3
-DETECTION_MAX_VERTICES=4
-DETECTION_MIN_AREA_RATIO=0.001
-DETECTION_MAX_AREA_RATIO=0.15
-DETECTION_ASPECT_RATIO_MIN=0.3
-DETECTION_ASPECT_RATIO_MAX=3.0
-DETECTION_APPROX_EPSILON=0.02
+# Strategy: original | downscale | compress | posterize | high_contrast | edge_enhanced | minimal
+PREPROCESSING_STRATEGY=compress
 
-# Stage 1B: Stamp Classifier
-CLASSIFIER_MODE=heuristic
-CLASSIFIER_CONFIDENCE_THRESHOLD=0.6
-CLASSIFIER_COLOR_VARIANCE_WEIGHT=0.35
-CLASSIFIER_EDGE_COMPLEXITY_WEIGHT=0.30
-CLASSIFIER_SIZE_WEIGHT=0.20
-CLASSIFIER_PERFORATION_WEIGHT=0.15
-# CLASSIFIER_MODEL_PATH=models/stamp_classifier.onnx  # Optional trained model
+# Resolution
+PREPROCESSING_MAX_DIM=640
 
-# Stage 1C: YOLO Fallback
-DETECTION_FALLBACK_TO_YOLO=true
-YOLO_MODEL_PATH=models/yolov8n.pt
-YOLO_CONFIDENCE_THRESHOLD=0.5
-YOLO_AUTO_DOWNLOAD=true
+# JPEG compression (0-100, lower = smaller file)
+PREPROCESSING_JPEG_QUALITY=85
+
+# Posterization (colors per channel, 2-256)
+PREPROCESSING_COLOR_LEVELS=8
 
 # =============================================================================
-# Camera Settings
-# =============================================================================
-CAMERA_INDEX=0
-
-# =============================================================================
-# Feedback & Visualization Settings
+# Identification Pipeline
 # =============================================================================
 
-# Session storage
+# Mode: single | multi | auto
+IDENTIFICATION_DEFAULT_MODE=auto
+
+# Auto-detection of single stamp (in AUTO mode)
+AUTO_DETECT_SINGLE_STAMP=true
+
+# Crop padding (percentage)
+CROP_PADDING_PERCENT=0.02
+
+# =============================================================================
+# Inspection & Debug
+# =============================================================================
+
+# Save all intermediate images and data
+SAVE_INTERMEDIATES=true
+DETECTION_SAVE_INTERMEDIATES=true
+
+# Inspection output directory
+INSPECTION_DIR=data/inspection
+DETECTION_INSPECTION_DIR=data/inspection
+
+# =============================================================================
+# Session & Feedback Storage
+# =============================================================================
 SESSIONS_DIR=data/sessions
 MISSED_STAMPS_DIR=data/missed_stamps
 
@@ -81,12 +102,15 @@ FEEDBACK_SAVE_CROPS=true
 FEEDBACK_SAVE_ORIGINAL=true
 FEEDBACK_OPEN_ANNOTATED=false
 
-# Overlay colors (BGR format)
-OVERLAY_COLOR_IDENTIFIED=0,255,0
-OVERLAY_COLOR_NO_MATCH=0,165,255
-OVERLAY_COLOR_REJECTED=0,0,255
-OVERLAY_COLOR_PENDING=0,255,255
-OVERLAY_THICKNESS=2
+# =============================================================================
+# Vision Prompt
+# =============================================================================
+VISION_PROMPT_PATH=config/llava_prompt.txt
+
+# =============================================================================
+# Camera Settings
+# =============================================================================
+CAMERA_INDEX=0
 
 # =============================================================================
 # Browser Automation (CDP)

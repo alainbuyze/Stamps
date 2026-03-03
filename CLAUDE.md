@@ -12,11 +12,11 @@ An AI-powered CLI application to manage a space-themed stamp collection: build a
 - **Local Database:** SQLite (built-in)
 - **Vector Database:** Supabase + pgvector
 - **Embeddings:** OpenAI text-embedding-3-small
-- **Vision/Description:** Groq API (llama-3.2-11b-vision, configurable)
-- **Object Detection:** OpenCV (primary) + YOLOv8 (fallback)
+- **Vision/Detection:** Groq API (primary) + Claude Haiku (fallback)
+- **Vision/Description:** Groq API (llama-3.2-11b-vision)
 - **Web Scraping:** Playwright + BeautifulSoup4
 - **Browser Automation:** Playwright CDP (Chrome DevTools Protocol)
-- **Image Processing:** Pillow, OpenCV
+- **Image Processing:** Pillow, OpenCV (preprocessing only)
 - **HTTP Client:** httpx
 
 Review technical standards in `@guides\technical_stack.md`
@@ -48,16 +48,13 @@ src/
 │   ├── indexer.py                # Index stamps into RAG
 │   └── search.py                 # Similarity search
 │
-├── vision/                       # Computer vision module
+├── vision/                       # Vision & identification module
 │   ├── __init__.py
-│   ├── camera.py                 # OpenCV camera capture
-│   ├── describer.py              # Groq vision API descriptions
-│   └── detection/                # Two-stage detection pipeline
-│       ├── __init__.py
-│       ├── polygon_detector.py   # Stage 1A: Classical CV
-│       ├── stamp_classifier.py   # Stage 1B: Heuristic filter
-│       ├── yolo_detector.py      # Stage 1C: YOLO fallback
-│       └── pipeline.py           # Orchestration
+│   ├── preprocessing.py          # Image preprocessing strategies
+│   ├── vision_detector.py        # Hybrid Groq/Claude detection
+│   ├── identification_pipeline.py # Single/multi stamp modes
+│   ├── inspection.py             # Inspection viewer & CLI
+│   └── camera.py                 # OpenCV camera capture
 │
 ├── feedback/                     # Scan feedback & visualization
 │   ├── __init__.py
@@ -65,11 +62,6 @@ src/
 │   ├── visualizer.py             # Annotated image generator
 │   ├── session_manager.py        # Session persistence
 │   └── console.py                # Rich console output
-│
-├── identification/               # Stamp identification module
-│   ├── __init__.py
-│   ├── identifier.py             # Pipeline orchestration
-│   └── results.py                # Result display & user selection
 │
 ├── migration/                    # LASTDODO → Colnect migration
 │   ├── __init__.py
@@ -86,8 +78,13 @@ src/
 config/
 └── llava_prompt.txt              # Configurable vision prompt template
 
-models/                           # YOLO weights (gitignored, auto-downloaded)
-data/                             # SQLite DB + logs + sessions (gitignored)
+data/                             # Runtime data (gitignored)
+├── stamps.db                     # SQLite database
+├── inspection/                   # All intermediate inspection data
+├── sessions/                     # Scan session archives
+├── missed_stamps/                # Stamps for re-ingestion
+└── logs/                         # Application logs
+
 tests/                            # Test files
 guides/                           # Development documentation
 ```
@@ -148,14 +145,39 @@ uv run stamp-tools rag stats
 ### Stamp Identification
 
 ```powershell
-# Identify stamps from camera
+# Identify stamps from camera (auto-detects single vs multi)
 uv run stamp-tools identify camera
 
 # Identify from image file
 uv run stamp-tools identify image --path "C:\path\to\photo.jpg"
 
+# Force single-stamp mode (skip detection, go direct to RAG)
+uv run stamp-tools identify image --path "stamp.jpg" --mode single
+
+# Force multi-stamp mode (album page)
+uv run stamp-tools identify image --path "album.jpg" --mode multi
+
 # Auto-add confirmed matches to Colnect
 uv run stamp-tools identify camera --add-to-colnect
+```
+
+### Inspection & Debug
+
+```powershell
+# List recent inspection sessions
+uv run stamp-tools inspect sessions
+
+# View session details
+uv run stamp-tools inspect session <session_id>
+
+# View specific identification details
+uv run stamp-tools inspect identification <session_id> <identification_id>
+
+# Open session images in viewer
+uv run stamp-tools inspect open-images <session_id>
+
+# Test preprocessing strategies on an image
+uv run stamp-tools inspect preprocess-test path/to/image.jpg
 ```
 
 ### Review & Feedback
@@ -232,19 +254,22 @@ SCRAPE_ERROR_BEHAVIOR=skip
 RAG_MATCH_AUTO_THRESHOLD=0.9
 RAG_MATCH_MIN_THRESHOLD=0.5
 
-# Vision - Groq
-GROQ_MODEL=llama-3.2-11b-vision-preview
+# Vision LLM Detection
+DETECTION_PRIMARY_PROVIDER=groq
+DETECTION_FALLBACK_PROVIDER=claude_haiku
+DETECTION_ENABLE_FALLBACK=true
 
-# Detection (Two-Stage)
-DETECTION_MODE=album
-DETECTION_MIN_VERTICES=3
-DETECTION_MAX_VERTICES=4
-CLASSIFIER_CONFIDENCE_THRESHOLD=0.6
-DETECTION_FALLBACK_TO_YOLO=true
+# Preprocessing
+PREPROCESSING_STRATEGY=compress
+PREPROCESSING_MAX_DIM=640
+PREPROCESSING_JPEG_QUALITY=85
 
-# Feedback
-FEEDBACK_SAVE_ANNOTATED=true
-FEEDBACK_SAVE_CROPS=true
+# Identification
+IDENTIFICATION_DEFAULT_MODE=auto
+
+# Inspection
+SAVE_INTERMEDIATES=true
+INSPECTION_DIR=data/inspection
 
 # Browser Automation
 CHROME_CDP_URL=http://localhost:9222
@@ -257,6 +282,7 @@ SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_KEY=your-service-role-key
 OPENAI_API_KEY=sk-xxxxx
 GROQ_API_KEY=gsk_xxxxx
+ANTHROPIC_API_KEY=sk-ant-xxxxx
 ```
 
 ## Code Conventions
@@ -298,58 +324,192 @@ except Exception as e:
     raise ScrapingError(f"Failed to scrape {url}") from e
 ```
 
-## Detection Architecture (Two-Stage)
+### Configuration Rules
 
-The stamp detection uses a two-stage pipeline optimized for album pages:
+**ALL configuration parameters MUST come from `src/core/config.py` exclusively.**
 
-### Stage 1A: Classical CV Polygon Detection
-
-Uses OpenCV for efficient, training-free detection:
+- No hardcoded defaults in dataclasses or module code
+- All config field names use UPPERCASE (e.g., `DETECTION_NMS_ENABLED`)
+- Factory functions like `create_*_from_env()` load values from `get_settings()`
+- Dataclass fields should be required (no default values) - defaults live in config.py
+- Classes should access settings directly via `get_settings()` - do NOT pass configuration as constructor parameters
 
 ```python
-# Conceptual flow
-1. Preprocess: grayscale → blur → adaptive threshold
-2. Find contours (cv2.findContours)
-3. Approximate polygons (cv2.approxPolyDP)
-4. Filter by:
-   - Vertices: 3 (triangle) or 4 (quadrilateral)
-   - Area: reasonable stamp size
-   - Convexity: must be convex shape
-   - Aspect ratio: 0.3 to 3.0
-5. Perspective correction → clean rectangular crops
+# ✅ GOOD - Class accesses settings directly
+class InspectionViewer:
+    def __init__(self):
+        settings = get_settings()
+        self.inspection_dir = settings.inspection_path
+
+# ❌ BAD - Passing config as parameter creates indirection
+class InspectionViewer:
+    def __init__(self, inspection_dir: Path):  # Don't do this
+        self.inspection_dir = inspection_dir
+
+# ✅ GOOD - Config dataclass with required fields
+@dataclass
+class DetectionConfig:
+    primary_provider: DetectionProvider  # Required, no default
+    enable_fallback: bool                # Required, no default
+
+def create_detector_from_env() -> Detector:
+    settings = get_settings()
+    config = DetectionConfig(
+        primary_provider=DetectionProvider(settings.DETECTION_PRIMARY_PROVIDER),
+        enable_fallback=settings.DETECTION_ENABLE_FALLBACK,
+    )
+    return Detector(config)
+
+# ❌ BAD - Hardcoded defaults
+@dataclass
+class DetectionConfig:
+    primary_provider: str = "groq"  # Don't do this
+    enable_fallback: bool = True    # Don't do this
 ```
 
-**Supported shapes:**
-- Triangles (3 vertices)
-- Rectangles, squares, diamonds (4 vertices)
-- Miniature sheets detected as single items
+### Output Directory Rules
 
-### Stage 1B: Stamp Classifier (Heuristics)
+**ALL execution output MUST go to `OUTPUT_ROOT_DIR`, not the project directory.**
 
-Filters false positives with weighted checks:
+- `OUTPUT_ROOT_DIR` is set in `.env.local` (e.g., `D:/Stamps`)
+- Database, logs, inspection, sessions, feedback all go under this root
+- Use computed properties from settings for full paths:
+  - `settings.database_path` → `OUTPUT_ROOT_DIR/stamps.db`
+  - `settings.log_path` → `OUTPUT_ROOT_DIR/logs/`
+  - `settings.inspection_path` → `OUTPUT_ROOT_DIR/inspection/`
+  - `settings.feedback_output_path` → `OUTPUT_ROOT_DIR/feedback/`
 
-| Check | Weight | Description |
-|-------|--------|-------------|
-| Color variance | 0.35 | Stamps are colorful, not blank |
-| Edge complexity | 0.30 | Stamps have detailed content |
-| Size plausibility | 0.20 | Reasonable dimensions |
-| Perforation hint | 0.15 | Optional wavy edge pattern |
+```python
+# ✅ GOOD - Use settings paths
+from src.core.config import get_settings
 
-Confidence threshold: **0.6** to accept as stamp.
+settings = get_settings()
+output_dir = settings.inspection_path  # Full path from OUTPUT_ROOT_DIR
 
-### Stage 1C: YOLO Fallback
+# ❌ BAD - Relative to project
+output_dir = Path("data/inspection")  # Don't do this
+```
 
-Triggered only when Stage 1A finds no candidates:
-- Pre-trained or fine-tuned YOLOv8
-- Only loaded when needed (lazy loading)
-- Configurable via `DETECTION_FALLBACK_TO_YOLO`
+## Detection Architecture (Vision LLM)
 
-### Stage 2: RAG Identification
+The stamp detection uses Vision LLM with hybrid provider support, replacing the earlier OpenCV approach for better reliability with variable input.
 
-Clean crops from Stage 1 feed into:
-1. Groq vision → description
-2. OpenAI → embedding  
-3. Supabase → similarity search
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      INPUT IMAGE                            │
+│                           │                                 │
+│            ┌──────────────┴──────────────┐                 │
+│            ▼                              ▼                 │
+│     ┌─────────────┐              ┌─────────────┐          │
+│     │   SINGLE    │              │    MULTI    │          │
+│     │   STAMP     │              │   (ALBUM)   │          │
+│     └──────┬──────┘              └──────┬──────┘          │
+│            │                            │                  │
+│            │                 ┌──────────┴──────────┐      │
+│            │                 ▼                     │      │
+│            │        ┌─────────────────┐           │      │
+│            │        │  PREPROCESSING  │           │      │
+│            │        │  (7 strategies) │           │      │
+│            │        └────────┬────────┘           │      │
+│            │                 │                     │      │
+│            │                 ▼                     │      │
+│            │        ┌─────────────────┐           │      │
+│            │        │  GROQ DETECTION │◄── Primary       │
+│            │        └────────┬────────┘   (cheap)  │      │
+│            │                 │                     │      │
+│            │           Fail? ├── No ───────┐      │      │
+│            │                 │             │      │      │
+│            │                Yes            │      │      │
+│            │                 ▼             │      │      │
+│            │        ┌─────────────────┐   │      │      │
+│            │        │  CLAUDE HAIKU   │   │      │      │
+│            │        │  FALLBACK       │   │      │      │
+│            │        └────────┬────────┘   │      │      │
+│            │                 │             │      │      │
+│            │                 └──────┬──────┘      │      │
+│            │                        │             │      │
+│            │                        ▼             │      │
+│            │               ┌─────────────────┐   │      │
+│            └──────────────►│  CROP STAMPS    │◄──┘      │
+│                            │  (full-res)     │          │
+│                            └────────┬────────┘          │
+│                                     │                    │
+│                                     ▼                    │
+│                            ┌─────────────────┐          │
+│                            │  GROQ VISION    │          │
+│                            │  DESCRIPTION    │          │
+│                            └────────┬────────┘          │
+│                                     │                    │
+│                                     ▼                    │
+│                            ┌─────────────────┐          │
+│                            │  RAG SEARCH     │          │
+│                            └────────┬────────┘          │
+│                                     │                    │
+│                                     ▼                    │
+│                            ┌─────────────────┐          │
+│                            │  INSPECTION &   │          │
+│                            │  RESULTS        │          │
+│                            └─────────────────┘          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Operation Modes
+
+| Mode | Description | Detection | Use Case |
+|------|-------------|-----------|----------|
+| `auto` | Auto-detect based on image | If needed | Default |
+| `single` | Skip detection, treat as one stamp | Skipped | Single stamp photos |
+| `multi` | Always run detection | Always | Album pages |
+
+### Detection Providers
+
+| Provider | Role | Cost | Quality |
+|----------|------|------|---------|
+| Groq (llama-3.2-11b-vision) | Primary | ~$0.0003/image | Good |
+| Claude Haiku | Fallback | ~$0.0004/image | Excellent |
+| Claude Sonnet | Optional | ~$0.0045/image | Best |
+
+Fallback triggered when:
+- Groq API error
+- JSON parse error
+- Fewer than `DETECTION_MIN_DETECTIONS` stamps found
+
+### Preprocessing Strategies
+
+| Strategy | Description | Token Reduction |
+|----------|-------------|-----------------|
+| `original` | No change | 0% |
+| `downscale` | Reduce resolution only | ~75% |
+| `compress` | Downscale + JPEG compression | ~80% **(default)** |
+| `posterize` | Color quantization | ~85% |
+| `high_contrast` | CLAHE enhancement | ~80% |
+| `edge_enhanced` | Edges on posterized | ~85% |
+| `minimal` | Most aggressive | ~95% |
+
+### Inspection System
+
+Every identification session saves full inspection data:
+
+```
+data/inspection/<session_id>/
+├── original.jpg              # Original input
+├── session.json              # Complete session data
+├── inspection_report.json    # Summary
+│
+├── preprocessed/
+│   └── preprocessed.jpg      # Image sent to detection API
+│
+├── annotated/
+│   ├── detection.jpg         # Detection boxes
+│   └── final_result.jpg      # Final results with status colors
+│
+└── crops/
+    ├── <id>_001.jpg          # Individual stamp crops (full-res)
+    ├── <id>_002.jpg
+    └── ...
+```
 
 ## Feedback System
 
@@ -359,36 +519,26 @@ Every scan session produces visual feedback for review and re-ingestion:
 
 | Status | Color | Meaning |
 |--------|-------|---------|
-| 🟩 Identified | Green | Successfully matched in RAG |
+| 🟩 Identified | Green | Successfully matched in RAG (≥90%) |
+| 🟨 Needs Review | Yellow | Matched but below auto-accept (<90%) |
 | 🟧 No Match | Orange | Stamp detected but not in database |
-| 🟥 Rejected | Red | Failed classifier (not a stamp) |
-| 🟪 YOLO | Purple | Detected by YOLO fallback |
+| 🟥 Rejected | Red | Not identified as stamp |
 
-### Session Output Structure
+### Session Output
 
 ```
-data/
-├── sessions/
-│   └── 20260222_143052_abc123/
-│       ├── original.png          # Raw camera capture
-│       ├── annotated.png         # With colored overlays
-│       ├── session.json          # Full detection details
-│       └── crops/
-│           ├── 001_identified_AU5352.png
-│           ├── 002_no_match_unmatched.png
-│           └── 003_rejected_low_variance.png
-│
-└── missed_stamps/                # For later re-ingestion
-    └── 20260222_143052_abc123_002.png
+data/sessions/<session_id>/
+├── original.png              # Raw capture
+├── annotated.png             # With colored overlays
+├── session.json              # Full details
+└── crops/
+    ├── 001_identified_AU5352.png
+    ├── 002_no_match_unmatched.png
+    └── ...
+
+data/missed_stamps/           # For later re-ingestion
+└── <session_id>_002.png
 ```
-
-### Console Output
-
-After each scan, Rich displays:
-- Summary table with counts by status
-- Detailed table of identified stamps with confidence
-- Warning panel for stamps needing review
-- Path to annotated image
 
 ## Data Model
 
@@ -415,16 +565,6 @@ After each scan, Rich displays:
 - `description` (Groq-generated), `embedding` (vector 1536)
 - `country`, `year`, `created_at`, `updated_at`
 
-### Condition Mapping
-
-| LASTDODO (Dutch) | Colnect (English) |
-|------------------|-------------------|
-| Postfris | MNH |
-| Ongebruikt | MNH |
-| Gestempeld | Used |
-
-When multiple conditions: MNH takes precedence, comment contains breakdown (e.g., `MNH:3, U:1`).
-
 ## Key Workflows
 
 ### 1. Initialization Pipeline
@@ -433,9 +573,10 @@ When multiple conditions: MNH takes precedence, comment contains breakdown (e.g.
 stamp-tools init
     │
     ├── Create SQLite database (data/stamps.db)
-    ├── Create session directories
+    ├── Create inspection/session directories
     ├── Verify Supabase connection
     ├── Verify Groq API key
+    ├── Verify Anthropic API key (for fallback)
     └── Create RAG table in Supabase
 ```
 
@@ -467,21 +608,25 @@ stamp-tools identify camera
     │
     ├── Capture frame from camera (OpenCV)
     │
-    ├── Stage 1A: Polygon detection (OpenCV)
-    │   └── Find triangles + quadrilaterals
+    ├── Determine mode (auto/single/multi)
     │
-    ├── Stage 1B: Classify each polygon
-    │   └── Accept stamps, reject non-stamps
+    ├── If MULTI mode:
+    │   ├── Preprocess image (downscale, compress)
+    │   ├── Call Groq detection API
+    │   │   └── If fails: Call Claude Haiku fallback
+    │   ├── Parse JSON response → bounding boxes
+    │   └── Extract crops from ORIGINAL (full-res)
     │
-    ├── Stage 1C: YOLO fallback (if nothing found)
+    ├── If SINGLE mode:
+    │   └── Use entire image as crop
     │
-    ├── For each accepted stamp:
-    │   ├── Call Groq API → description
+    ├── For each stamp crop:
+    │   ├── Call Groq vision → description
     │   ├── Generate embedding → search Supabase
-    │   ├── If score > 90%: auto-accept
+    │   ├── If score ≥ 90%: auto-accept
     │   └── Else: show top 3 for selection
     │
-    ├── Save session (annotated image + crops + JSON)
+    ├── Save inspection data (all intermediates)
     │
     └── For confirmed matches:
         └── Browser automation → add to Colnect
@@ -519,7 +664,32 @@ The toolset connects to an existing Chrome session via Chrome DevTools Protocol.
 | **LASTDODO** | Source collection | Browser session | Free account |
 | **Supabase** | Vector database | API key | 500MB |
 | **OpenAI** | Embeddings | API key | Pay-per-use (~€0.50 total) |
-| **Groq** | Vision descriptions | API key | 30 req/min free |
+| **Groq** | Vision detection & description | API key | 30 req/min free |
+| **Anthropic** | Detection fallback (Claude Haiku) | API key | Pay-per-use |
+
+## Cost Estimate
+
+### Per 100 Album Pages (~8 stamps each)
+
+| Component | Cost |
+|-----------|------|
+| Detection (Groq + Haiku fallback) | ~$0.04 |
+| Description (Groq) | ~$0.24 |
+| RAG search (Supabase) | Free tier |
+| **Total** | **~$0.28** |
+
+### One-time Setup (50K stamps)
+
+| Component | Cost |
+|-----------|------|
+| Groq descriptions | ~€5-15 |
+| OpenAI embeddings | ~€0.50 |
+| **Total** | **~€6-16** |
+
+### Ongoing
+
+- Monthly: <€0.05 (occasional identification)
+- Supabase: Free tier (<500MB)
 
 ## Default Themes
 
@@ -532,7 +702,7 @@ Configurable via `--themes` parameter.
 ## Important Context
 
 - **Hardware:** AMD Ryzen 9 6900HX (no ROCm support for integrated GPU)
-- **Vision:** Cloud-only via Groq API (no local LLaVA)
+- **Vision:** Cloud-only via Groq/Claude APIs (no local models)
 - **Primary platform:** Colnect (source of truth for collection)
 - **LASTDODO:** One-time migration only, no sync back
 - **Cost target:** < €1/month ongoing, ~€6-16 one-time setup
@@ -540,8 +710,8 @@ Configurable via `--themes` parameter.
 
 ## Identification Thresholds
 
-- **Auto-accept:** > 90% similarity score
-- **Show top 3:** ≤ 90% but ≥ 50%
+- **Auto-accept:** ≥ 90% similarity score
+- **Show top 3:** < 90% but ≥ 50%
 - **No match:** < 50%
 
 ## Development Workflow
@@ -572,7 +742,7 @@ This is a Windows environment using PowerShell/CMD, NOT bash.
 - [PRD.md](./PRD.md) - Full product requirements document
 - [Colnect Stamps](https://colnect.com/en/stamps/) - Primary catalog
 - [LASTDODO](https://www.lastdodo.nl/) - Source collection
-- [Ultralytics YOLOv8](https://docs.ultralytics.com/) - Object detection
 - [Supabase Vector](https://supabase.com/docs/guides/ai/vector-columns) - pgvector docs
 - [Groq Vision](https://console.groq.com/docs/vision) - Vision API
+- [Anthropic Claude](https://docs.anthropic.com/) - Claude API
 - [Playwright Python](https://playwright.dev/python/) - Browser automation

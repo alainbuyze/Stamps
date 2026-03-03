@@ -24,11 +24,19 @@ class Settings(BaseSettings):
     )
 
     # ==========================================================================
+    # Output Root Directory
+    # ==========================================================================
+    OUTPUT_ROOT_DIR: str = Field(
+        default="data",
+        description="Root directory for ALL execution output (database, logs, inspection, etc.)",
+    )
+
+    # ==========================================================================
     # Database Settings
     # ==========================================================================
     DATABASE_PATH: str = Field(
-        default="data/stamps.db",
-        description="Path to SQLite database file",
+        default="stamps.db",
+        description="Database filename (relative to OUTPUT_ROOT_DIR)",
     )
 
     # ==========================================================================
@@ -47,8 +55,8 @@ class Settings(BaseSettings):
         description="Error behavior: 'skip' to continue, 'abort' to stop",
     )
     SCRAPE_CHECKPOINT_FILE: str = Field(
-        default="data/scrape_checkpoint.json",
-        description="Path to checkpoint file for resuming scrapes",
+        default="scrape_checkpoint.json",
+        description="Checkpoint filename (relative to OUTPUT_ROOT_DIR)",
     )
 
     # Browser settings for Playwright
@@ -114,43 +122,127 @@ class Settings(BaseSettings):
     )
 
     # ==========================================================================
-    # Detection Pipeline Settings
+    # Vision LLM Detection Settings
     # ==========================================================================
-    DETECTION_MODE: str = Field(
-        default="album",
-        description="Detection mode: album | loose | mixed",
+    DETECTION_PRIMARY_PROVIDER: str = Field(
+        default="groq",
+        description="Primary detection provider: groq | claude_haiku | claude_sonnet",
     )
-    DETECTION_MIN_VERTICES: int = Field(
-        default=3,
-        description="Minimum vertices for polygon detection (3=triangles)",
+    DETECTION_FALLBACK_PROVIDER: str = Field(
+        default="claude_haiku",
+        description="Fallback detection provider: groq | claude_haiku | claude_sonnet",
     )
-    DETECTION_MAX_VERTICES: int = Field(
-        default=4,
-        description="Maximum vertices for polygon detection (4=quads)",
-    )
-    DETECTION_MIN_AREA_RATIO: float = Field(
-        default=0.001,
-        description="Minimum area as ratio of image (0.1%)",
-    )
-    DETECTION_MAX_AREA_RATIO: float = Field(
-        default=0.15,
-        description="Maximum area as ratio of image (15%)",
-    )
-    DETECTION_ASPECT_RATIO_MIN: float = Field(
-        default=0.3,
-        description="Minimum aspect ratio for stamps",
-    )
-    DETECTION_ASPECT_RATIO_MAX: float = Field(
-        default=3.0,
-        description="Maximum aspect ratio for stamps",
-    )
-    DETECTION_APPROX_EPSILON: float = Field(
-        default=0.02,
-        description="Polygon approximation epsilon",
-    )
-    DETECTION_FALLBACK_TO_YOLO: bool = Field(
+    DETECTION_ENABLE_FALLBACK: bool = Field(
         default=True,
-        description="Use YOLO fallback when polygon detection finds nothing",
+        description="Enable fallback to secondary provider on failure",
+    )
+    DETECTION_MIN_DETECTIONS: int = Field(
+        default=1,
+        description="Minimum detections before triggering fallback",
+    )
+    DETECTION_FALLBACK_ON_PARSE_ERROR: bool = Field(
+        default=True,
+        description="Trigger fallback on JSON parse error",
+    )
+    DETECTION_FALLBACK_ON_API_ERROR: bool = Field(
+        default=True,
+        description="Trigger fallback on API error",
+    )
+    DETECTION_NMS_ENABLED: bool = Field(
+        default=True,
+        description="Enable Non-Maximum Suppression to filter duplicate detections",
+    )
+    DETECTION_NMS_IOU_THRESHOLD: float = Field(
+        default=0.3,
+        description="IoU threshold for NMS - boxes with IoU above this are merged (0.0-1.0)",
+    )
+    DETECTION_GROQ_TEMPERATURE: float = Field(
+        default=0.1,
+        description="Temperature for Groq detection calls",
+    )
+    DETECTION_GROQ_MAX_TOKENS: int = Field(
+        default=1500,
+        description="Max tokens for Groq detection response",
+    )
+    DETECTION_CLAUDE_MODEL_HAIKU: str = Field(
+        default="claude-3-haiku-20240307",
+        description="Claude Haiku model for detection",
+    )
+    DETECTION_CLAUDE_MODEL_SONNET: str = Field(
+        default="claude-3-5-sonnet-20241022",
+        description="Claude Sonnet model for detection",
+    )
+    DETECTION_CLAUDE_TEMPERATURE: float = Field(
+        default=0.1,
+        description="Temperature for Claude detection calls",
+    )
+    DETECTION_CLAUDE_MAX_TOKENS: int = Field(
+        default=1500,
+        description="Max tokens for Claude detection response",
+    )
+
+    # ==========================================================================
+    # Preprocessing Settings
+    # ==========================================================================
+    PREPROCESSING_STRATEGY: str = Field(
+        default="compress",
+        description="Preprocessing strategy: original | downscale | compress | posterize | high_contrast | edge_enhanced | minimal",
+    )
+    PREPROCESSING_MAX_DIM: int = Field(
+        default=640,
+        description="Maximum dimension (width or height) for preprocessing",
+    )
+    PREPROCESSING_JPEG_QUALITY: int = Field(
+        default=85,
+        description="JPEG compression quality (0-100)",
+    )
+    PREPROCESSING_COLOR_LEVELS: int = Field(
+        default=8,
+        description="Color levels per channel for posterization (2-256)",
+    )
+    PREPROCESSING_CLAHE_CLIP_LIMIT: float = Field(
+        default=2.0,
+        description="CLAHE clip limit for contrast enhancement",
+    )
+    PREPROCESSING_CLAHE_GRID_SIZE: int = Field(
+        default=8,
+        description="CLAHE grid size for contrast enhancement",
+    )
+    PREPROCESSING_EDGE_WEIGHT: float = Field(
+        default=0.3,
+        description="Edge blend weight for edge_enhanced strategy",
+    )
+
+    # ==========================================================================
+    # Identification Pipeline Settings
+    # ==========================================================================
+    IDENTIFICATION_DEFAULT_MODE: str = Field(
+        default="auto",
+        description="Default identification mode: auto | single | multi",
+    )
+    IDENTIFICATION_CROP_PADDING_PERCENT: float = Field(
+        default=0.02,
+        description="Padding around stamp crops as percentage (0.02 = 2%)",
+    )
+    IDENTIFICATION_MAX_MATCHES: int = Field(
+        default=5,
+        description="Maximum number of RAG matches to return per stamp",
+    )
+    IDENTIFICATION_DESCRIPTION_PROVIDER: str = Field(
+        default="groq",
+        description="Provider for stamp description generation: groq | openai",
+    )
+
+    # ==========================================================================
+    # Inspection Settings
+    # ==========================================================================
+    INSPECTION_DIR: str = Field(
+        default="inspection",
+        description="Inspection subdirectory (relative to OUTPUT_ROOT_DIR)",
+    )
+    INSPECTION_SAVE_INTERMEDIATES: bool = Field(
+        default=True,
+        description="Save all intermediate images for debugging",
     )
 
     # ==========================================================================
@@ -189,8 +281,8 @@ class Settings(BaseSettings):
     # Feedback System Settings
     # ==========================================================================
     FEEDBACK_OUTPUT_DIR: str = Field(
-        default="data",
-        description="Base output directory for session data",
+        default="feedback",
+        description="Feedback subdirectory (relative to OUTPUT_ROOT_DIR)",
     )
     FEEDBACK_SAVE_ORIGINAL: bool = Field(
         default=True,
@@ -252,6 +344,10 @@ class Settings(BaseSettings):
         default=None,
         description="Groq API key for vision",
     )
+    ANTHROPIC_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Anthropic API key for Claude fallback",
+    )
 
     # ==========================================================================
     # Logging Settings
@@ -265,8 +361,8 @@ class Settings(BaseSettings):
         description="Log message format",
     )
     LOG_DIR: str = Field(
-        default="data/logs",
-        description="Directory for log files",
+        default="logs",
+        description="Logs subdirectory (relative to OUTPUT_ROOT_DIR)",
     )
     LOG_MAX_SIZE_MB: int = Field(
         default=10,
@@ -286,19 +382,43 @@ class Settings(BaseSettings):
     )
 
     # ==========================================================================
-    # Computed Properties
+    # Computed Properties (combine OUTPUT_ROOT_DIR with relative paths)
     # ==========================================================================
+    @computed_field
+    @property
+    def output_root_path(self) -> Path:
+        """Full path to output root directory."""
+        return Path(self.OUTPUT_ROOT_DIR)
+
     @computed_field
     @property
     def database_path(self) -> Path:
         """Full path to SQLite database."""
-        return Path(self.DATABASE_PATH)
+        return Path(self.OUTPUT_ROOT_DIR) / self.DATABASE_PATH
 
     @computed_field
     @property
     def log_path(self) -> Path:
         """Full path to log directory."""
-        return Path(self.LOG_DIR)
+        return Path(self.OUTPUT_ROOT_DIR) / self.LOG_DIR
+
+    @computed_field
+    @property
+    def inspection_path(self) -> Path:
+        """Full path to inspection directory."""
+        return Path(self.OUTPUT_ROOT_DIR) / self.INSPECTION_DIR
+
+    @computed_field
+    @property
+    def feedback_output_path(self) -> Path:
+        """Full path to feedback output directory."""
+        return Path(self.OUTPUT_ROOT_DIR) / self.FEEDBACK_OUTPUT_DIR
+
+    @computed_field
+    @property
+    def checkpoint_path(self) -> Path:
+        """Full path to scrape checkpoint file."""
+        return Path(self.OUTPUT_ROOT_DIR) / self.SCRAPE_CHECKPOINT_FILE
 
     @computed_field
     @property
@@ -318,18 +438,13 @@ class Settings(BaseSettings):
         """Default themes as a list."""
         return [t.strip() for t in self.DEFAULT_THEMES.split(",")]
 
-    @computed_field
-    @property
-    def feedback_output_path(self) -> Path:
-        """Full path to feedback output directory."""
-        return Path(self.FEEDBACK_OUTPUT_DIR)
-
     def validate_api_keys(self) -> dict[str, bool]:
         """Check which API keys are configured."""
         return {
             "supabase": bool(self.SUPABASE_URL and self.SUPABASE_KEY),
             "openai": bool(self.OPENAI_API_KEY),
             "groq": bool(self.GROQ_API_KEY),
+            "anthropic": bool(self.ANTHROPIC_API_KEY),
         }
 
 

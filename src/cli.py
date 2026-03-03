@@ -650,219 +650,281 @@ def rag_stats() -> None:
 
 
 # =============================================================================
-# Identify Command Group
+# Identify Command Group (Vision LLM Pipeline)
 # =============================================================================
 
 
 @cli.group()
 def identify() -> None:
-    """Stamp identification commands."""
+    """Stamp identification commands using Vision LLM detection."""
     pass
 
 
 @identify.command("camera")
+@click.option("--mode", type=click.Choice(["auto", "single", "multi"]), default="auto",
+              help="Mode: auto (detect), single (one stamp), multi (album page)")
 @click.option("--add-to-colnect", is_flag=True, help="Auto-add matches to Colnect")
-@click.option("--camera", type=int, default=None, help="Camera device index")
-@click.option("--no-preview", is_flag=True, help="Skip preview, capture immediately")
-@click.option("--save-annotated", type=click.Path(), default=None, help="Save annotated image")
-def identify_camera(add_to_colnect: bool, camera: int, no_preview: bool, save_annotated: str) -> None:
-    """Identify stamps from camera.
+@click.option("--camera", type=int, default=0, help="Camera device index")
+def identify_camera(mode: str, add_to_colnect: bool, camera: int) -> None:
+    """Identify stamps from camera using Vision LLM.
 
-    Captures image from camera, detects stamps, and identifies them
-    using the RAG database.
+    Uses Groq (with Claude Haiku fallback) for stamp detection,
+    then RAG search for identification.
+
+    Modes:
+        - auto: Automatically detect if single stamp or album page
+        - single: Skip detection, treat entire image as one stamp
+        - multi: Run detection for multiple stamps (album page)
 
     Example:
         stamp-tools identify camera
-        stamp-tools identify camera --add-to-colnect
-        stamp-tools identify camera --camera 1
-        stamp-tools identify camera --no-preview
+        stamp-tools identify camera --mode single
+        stamp-tools identify camera --mode multi --add-to-colnect
     """
-    import asyncio
-    from pathlib import Path
+    import cv2
 
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+    from src.vision import (
+        create_pipeline_from_env,
+        IdentificationMode,
+    )
 
-    from src.identification.identifier import StampIdentifier
-    from src.identification.results import display_results
-
-    console.print(Panel("Stamp Identification - Camera", style="bold blue"))
-
-    # Verify setup
-    identifier = StampIdentifier()
-    console.print("[dim]Verifying setup...[/dim]")
-
-    status = identifier.verify_setup()
-    all_ready = all(status.values())
-
-    for component, ready in status.items():
-        if ready:
-            console.print(f"   [green]✓[/green] {component}")
-        else:
-            console.print(f"   [red]✗[/red] {component}")
-
-    if not all_ready:
-        console.print("\n[red]Cannot proceed - some components not ready.[/red]")
-        console.print("[dim]Check your configuration with 'stamp-tools config validate'[/dim]")
-        sys.exit(1)
-
+    console.print(Panel("Stamp Identification - Camera (Vision LLM)", style="bold blue"))
+    console.print(f"[bold]Mode:[/bold] {mode}")
     console.print()
 
-    async def run_identification():
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Starting...", total=None)
-
-            def on_progress(current: int, total: int, message: str):
-                progress.update(task, total=total, completed=current, description=message)
-
-            try:
-                batch = await identifier.identify_from_camera(
-                    camera_index=camera,
-                    use_preview=not no_preview,
-                    progress_callback=on_progress,
-                )
-                return batch
-            except Exception as e:
-                logger.error(f"Identification failed: {e}")
-                raise
+    # Map mode string to enum
+    mode_map = {
+        "auto": IdentificationMode.AUTO,
+        "single": IdentificationMode.SINGLE_STAMP,
+        "multi": IdentificationMode.MULTI_STAMP,
+    }
+    identification_mode = mode_map[mode]
 
     try:
-        batch = asyncio.run(run_identification())
+        # Create pipeline
+        console.print("[dim]Initializing pipeline...[/dim]")
+        pipeline = create_pipeline_from_env()
+        console.print("[green]✓[/green] Pipeline ready")
+        console.print()
 
-        if batch is None:
-            console.print("\n[yellow]Capture cancelled.[/yellow]")
+        # Capture from camera
+        console.print("[bold]Capturing from camera...[/bold]")
+        console.print("[dim]Press SPACE to capture, ESC to cancel[/dim]")
+
+        cap = cv2.VideoCapture(camera)
+        if not cap.isOpened():
+            console.print(f"[red]Failed to open camera {camera}[/red]")
+            sys.exit(1)
+
+        image = None
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                console.print("[red]Failed to read frame[/red]")
+                break
+
+            cv2.imshow("Stamp Capture - SPACE to capture, ESC to cancel", frame)
+            key = cv2.waitKey(1) & 0xFF
+
+            if key == 27:  # ESC
+                console.print("[yellow]Cancelled[/yellow]")
+                cap.release()
+                cv2.destroyAllWindows()
+                return
+            elif key == 32:  # SPACE
+                image = frame.copy()
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+        if image is None:
+            console.print("[yellow]No image captured[/yellow]")
             return
 
-        # Save annotated image if requested
-        if save_annotated and batch.total_detected > 0:
-            save_path = Path(save_annotated)
-            batch.detection_result.save_annotated(save_path)
-            console.print(f"\n[dim]Saved annotated image to {save_path}[/dim]")
+        console.print("[green]✓[/green] Image captured")
+        console.print()
 
-        # Display results interactively
-        confirmed = display_results(batch, console=console, interactive=True)
+        # Run identification
+        console.print("[bold]Running identification...[/bold]")
+        session = pipeline.identify(
+            image,
+            mode=identification_mode,
+            source="camera",
+        )
 
-        if add_to_colnect and confirmed:
-            console.print("\n[yellow]Colnect automation not yet implemented (Phase 5)[/yellow]")
-            console.print(f"Would add {len(confirmed)} stamps to Colnect collection.")
+        # Display results
+        _display_session_results(session, console)
+
+        if add_to_colnect:
+            confirmed = [i for i in session.identifications if i.auto_accepted]
+            if confirmed:
+                console.print("\n[yellow]Colnect automation not yet implemented[/yellow]")
+                console.print(f"Would add {len(confirmed)} stamps to Colnect collection.")
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Cancelled.[/yellow]")
         sys.exit(130)
     except Exception as e:
         console.print(f"\n[red]Identification failed: {e}[/red]")
+        logger.exception("Identification error")
         sys.exit(1)
 
 
 @identify.command("image")
 @click.option("--path", required=True, type=click.Path(exists=True), help="Image path")
+@click.option("--mode", type=click.Choice(["auto", "single", "multi"]), default="auto",
+              help="Mode: auto (detect), single (one stamp), multi (album page)")
 @click.option("--add-to-colnect", is_flag=True, help="Auto-add matches to Colnect")
-@click.option("--save-annotated", type=click.Path(), default=None, help="Save annotated image")
-@click.option("--non-interactive", is_flag=True, help="Skip user selection prompts")
-@click.option("--detector", type=click.Choice(["yolo", "contour", "auto"]), default="auto",
-              help="Detection method: yolo (ML), contour (classical CV), auto (try both)")
-def identify_image(path: str, add_to_colnect: bool, save_annotated: str, non_interactive: bool, detector: str) -> None:
-    """Identify stamps from image file.
+def identify_image(path: str, mode: str, add_to_colnect: bool) -> None:
+    """Identify stamps from image file using Vision LLM.
 
-    Loads an image, detects stamps, and identifies them using the RAG database.
+    Uses Groq (with Claude Haiku fallback) for stamp detection,
+    then RAG search for identification.
 
-    Detector options:
-        - auto: YOLO first, falls back to treating whole image as stamp (default)
-        - contour: Classical CV contour detection - good for album pages
-        - yolo: YOLO object detection only
+    Modes:
+        - auto: Automatically detect if single stamp or album page
+        - single: Skip detection, treat entire image as one stamp
+        - multi: Run detection for multiple stamps (album page)
 
     Example:
         stamp-tools identify image --path "photo.jpg"
-        stamp-tools identify image --path "stamps.png" --detector contour
-        stamp-tools identify image --path "album_page.jpg" --detector contour --save-annotated "result.jpg"
+        stamp-tools identify image --path "stamp.jpg" --mode single
+        stamp-tools identify image --path "album_page.jpg" --mode multi
     """
-    import asyncio
+    import cv2
     from pathlib import Path as PathLib
 
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+    from src.vision import (
+        create_pipeline_from_env,
+        IdentificationMode,
+    )
 
-    from src.identification.identifier import StampIdentifier
-    from src.identification.results import display_results
-
-    console.print(Panel("Stamp Identification - Image", style="bold blue"))
+    console.print(Panel("Stamp Identification - Image (Vision LLM)", style="bold blue"))
     console.print(f"[bold]Image:[/bold] {path}")
-    console.print(f"[bold]Detector:[/bold] {detector}")
+    console.print(f"[bold]Mode:[/bold] {mode}")
     console.print()
 
-    # Verify setup
-    identifier = StampIdentifier(detector_type=detector)
-    console.print("[dim]Verifying setup...[/dim]")
-
-    status = identifier.verify_setup()
-    all_ready = all(status.values())
-
-    for component, ready in status.items():
-        if ready:
-            console.print(f"   [green]✓[/green] {component}")
-        else:
-            console.print(f"   [red]✗[/red] {component}")
-
-    if not all_ready:
-        console.print("\n[red]Cannot proceed - some components not ready.[/red]")
-        console.print("[dim]Check your configuration with 'stamp-tools config validate'[/dim]")
-        sys.exit(1)
-
-    console.print()
-
-    async def run_identification():
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Starting...", total=None)
-
-            def on_progress(current: int, total: int, message: str):
-                progress.update(task, total=total, completed=current, description=message)
-
-            try:
-                batch = await identifier.identify_from_file(
-                    PathLib(path),
-                    progress_callback=on_progress,
-                )
-                return batch
-            except Exception as e:
-                logger.error(f"Identification failed: {e}")
-                raise
+    # Map mode string to enum
+    mode_map = {
+        "auto": IdentificationMode.AUTO,
+        "single": IdentificationMode.SINGLE_STAMP,
+        "multi": IdentificationMode.MULTI_STAMP,
+    }
+    identification_mode = mode_map[mode]
 
     try:
-        batch = asyncio.run(run_identification())
+        # Load image
+        image = cv2.imread(path)
+        if image is None:
+            console.print(f"[red]Failed to load image: {path}[/red]")
+            sys.exit(1)
 
-        # Save annotated image if requested
-        if save_annotated and batch.total_detected > 0:
-            save_path = PathLib(save_annotated)
-            batch.detection_result.save_annotated(save_path)
-            console.print(f"\n[dim]Saved annotated image to {save_path}[/dim]")
+        console.print(f"[green]✓[/green] Loaded image: {image.shape[1]}x{image.shape[0]}")
+        console.print()
 
-        # Display results
-        confirmed = display_results(
-            batch,
-            console=console,
-            interactive=not non_interactive,
+        # Create pipeline
+        console.print("[dim]Initializing pipeline...[/dim]")
+        pipeline = create_pipeline_from_env()
+        console.print("[green]✓[/green] Pipeline ready")
+        console.print()
+
+        # Run identification
+        console.print("[bold]Running identification...[/bold]")
+        session = pipeline.identify(
+            image,
+            mode=identification_mode,
+            source="file",
+            source_path=str(PathLib(path).absolute()),
         )
 
-        if add_to_colnect and confirmed:
-            console.print("\n[yellow]Colnect automation not yet implemented (Phase 5)[/yellow]")
-            console.print(f"Would add {len(confirmed)} stamps to Colnect collection.")
+        # Display results
+        _display_session_results(session, console)
+
+        # Show inspection path
+        settings = get_settings()
+        console.print(f"\n[dim]Inspection data: {settings.inspection_path / session.session_id}/[/dim]")
+
+        if add_to_colnect:
+            confirmed = [i for i in session.identifications if i.auto_accepted]
+            if confirmed:
+                console.print("\n[yellow]Colnect automation not yet implemented[/yellow]")
+                console.print(f"Would add {len(confirmed)} stamps to Colnect collection.")
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Cancelled.[/yellow]")
         sys.exit(130)
     except Exception as e:
         console.print(f"\n[red]Identification failed: {e}[/red]")
+        logger.exception("Identification error")
         sys.exit(1)
+
+
+def _display_session_results(session, console) -> None:
+    """Display identification session results."""
+    from rich.table import Table
+
+    console.print()
+
+    # Summary
+    summary = session.summary
+    console.print(Panel(
+        f"[bold]Session:[/bold] {session.session_id}\n"
+        f"[bold]Mode:[/bold] {session.mode.value}\n"
+        f"[bold]Total time:[/bold] {session.total_latency_ms}ms",
+        title="Session Info",
+        border_style="blue"
+    ))
+
+    console.print(f"\n[bold]Results:[/bold]")
+    console.print(f"  Total stamps: {summary['total_stamps']}")
+    console.print(f"  [green]Identified:[/green] {summary['identified']}")
+    console.print(f"  [yellow]Needs review:[/yellow] {summary['needs_review']}")
+    console.print(f"  [orange1]No match:[/orange1] {summary['no_match']}")
+
+    # Detection info
+    if session.detection_result:
+        det = session.detection_result
+        console.print(f"\n[bold]Detection:[/bold]")
+        console.print(f"  Provider: {det.provider_used if det.provider_used else 'N/A'}")
+        if det.fallback_triggered:
+            console.print(f"  [yellow]Fallback triggered:[/yellow] {det.fallback_reason}")
+        console.print(f"  Latency: {det.primary_latency_ms}ms")
+
+    # Identifications table
+    if session.identifications:
+        console.print()
+        table = Table(title="Identifications", show_header=True)
+        table.add_column("ID", style="dim", width=10)
+        table.add_column("Status", width=12)
+        table.add_column("Score", justify="right", width=8)
+        table.add_column("Match", width=30)
+
+        status_colors = {
+            "identified": "green",
+            "needs_review": "yellow",
+            "no_match": "orange1",
+            "pending": "dim",
+        }
+
+        for ident in session.identifications:
+            status = ident.status
+            color = status_colors.get(status, "white")
+
+            match_text = "-"
+            if ident.top_match:
+                match_text = f"{ident.top_match.colnect_id}"
+                if ident.top_match.country:
+                    match_text += f" ({ident.top_match.country})"
+
+            table.add_row(
+                ident.identification_id[:10],
+                f"[{color}]{status}[/{color}]",
+                f"{ident.best_score:.0%}" if ident.best_score > 0 else "-",
+                match_text[:30],
+            )
+
+        console.print(table)
 
 
 # =============================================================================
@@ -1063,6 +1125,124 @@ def review_missed(limit: int) -> None:
 
     except Exception as e:
         console.print(f"[red]Failed to list missed stamps: {e}[/red]")
+        sys.exit(1)
+
+
+# =============================================================================
+# Inspect Command Group (Vision LLM Pipeline)
+# =============================================================================
+
+
+@cli.group()
+def inspect() -> None:
+    """Inspection tools for Vision LLM pipeline results."""
+    pass
+
+
+@inspect.command("sessions")
+@click.option("--limit", "-n", default=20, help="Number of sessions to show")
+def inspect_sessions(limit: int) -> None:
+    """List inspection sessions.
+
+    Example:
+        stamp-tools inspect sessions
+        stamp-tools inspect sessions --limit 10
+    """
+    from src.vision import InspectionViewer
+
+    viewer = InspectionViewer()
+    sessions = viewer.list_sessions(limit=limit)
+
+    if not sessions:
+        console.print("[dim]No inspection sessions found.[/dim]")
+        console.print(f"[dim]Directory: {viewer.inspection_dir}[/dim]")
+        return
+
+    viewer.display_sessions_list(sessions)
+
+
+@inspect.command("session")
+@click.argument("session_id")
+def inspect_session(session_id: str) -> None:
+    """Show session details.
+
+    Example:
+        stamp-tools inspect session 20260302_143052_abc123
+    """
+    from src.vision import InspectionViewer
+
+    viewer = InspectionViewer()
+    session = viewer.load_session(session_id)
+
+    if session:
+        viewer.display_session_detail(session)
+    else:
+        console.print(f"[red]Session not found: {session_id}[/red]")
+        sys.exit(1)
+
+
+@inspect.command("identification")
+@click.argument("session_id")
+@click.argument("identification_id")
+def inspect_identification(session_id: str, identification_id: str) -> None:
+    """Show identification details.
+
+    Example:
+        stamp-tools inspect identification 20260302_143052_abc123 abc123_001
+    """
+    from src.vision import InspectionViewer
+
+    viewer = InspectionViewer()
+    session = viewer.load_session(session_id)
+
+    if session:
+        viewer.display_identification_detail(session, identification_id)
+    else:
+        console.print(f"[red]Session not found: {session_id}[/red]")
+        sys.exit(1)
+
+
+@inspect.command("open-images")
+@click.argument("session_id")
+def inspect_open_images(session_id: str) -> None:
+    """Open session images in viewer.
+
+    Example:
+        stamp-tools inspect open-images 20260302_143052_abc123
+    """
+    from src.vision import InspectionViewer
+
+    viewer = InspectionViewer()
+    session = viewer.load_session(session_id)
+
+    if session:
+        viewer.open_images(session)
+        console.print("[green]Opened images in default viewer.[/green]")
+    else:
+        console.print(f"[red]Session not found: {session_id}[/red]")
+        sys.exit(1)
+
+
+@inspect.command("preprocess-test")
+@click.argument("image_path", type=click.Path(exists=True))
+def inspect_preprocess_test(image_path: str) -> None:
+    """Test preprocessing strategies on an image.
+
+    Generates all variants and comparison report.
+    Output goes to inspection_path/preprocessing_test.
+
+    Example:
+        stamp-tools inspect preprocess-test path/to/album.jpg
+    """
+    from pathlib import Path as PathLib
+    from src.vision import InspectionViewer
+
+    viewer = InspectionViewer()
+
+    try:
+        viewer.compare_preprocessing(PathLib(image_path))
+    except Exception as e:
+        console.print(f"[red]Preprocessing test failed: {e}[/red]")
         sys.exit(1)
 
 
