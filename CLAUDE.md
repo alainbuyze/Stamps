@@ -291,9 +291,55 @@ ANTHROPIC_API_KEY=sk-ant-xxxxx
 - **Pydantic** for configuration and data validation
 - **Rich** for all console output (progress bars, tables, colors)
 - **Pathlib** for all file operations (cross-platform)
-- **Docstrings** on all public functions and classes
+- **Docstrings** on all public functions and classes (see documentation conventions below)
 - Functions focused and testable
 - Logging at appropriate levels (DEBUG for flow, INFO for status, ERROR for failures)
+
+### Documentation Standards
+
+**Review full documentation conventions in `@guides\documentation_conventions.md`**
+
+Every module MUST include:
+
+1. **Module docstring** with: Goal, How to Use, Function Tree, Configuration Parameters table, Usage Examples
+2. **`if __name__ == "__main__":` block** with hardcoded test case
+3. **Package `__init__.py`** with module overview and deprecated module flags
+
+```python
+# Module docstring template (condensed)
+"""Module name - one-line description.
+
+Goal
+----
+What problem this module solves.
+
+How to Use
+----------
+    from src.package.module import MainClass
+    result = MainClass().process(data)
+
+Function Tree
+-------------
+- MainClass
+  - process(data) -> Result
+
+Configuration Parameters
+------------------------
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| PARAM_ONE | str | "value" | Description |
+"""
+
+# Required __main__ block
+if __name__ == "__main__":
+    """Test with hardcoded input."""
+    print("=== Module Test ===")
+    # Self-contained test case
+    test_input = {"key": "value"}
+    result = process(test_input)
+    assert result is not None
+    print("[PASS] Test completed!")
+```
 
 ### Path Handling (Windows)
 
@@ -724,18 +770,53 @@ Configurable via `--themes` parameter.
 
 ## Environment Instructions
 
-This is a Windows environment using PowerShell/CMD, NOT bash.
+This is a **Windows environment**. However, the Bash tool has limited reliability.
 
-### Shell Commands
-- Use PowerShell commands, not bash/Unix commands
-- Use `Get-Content` instead of `cat`
-- Use Windows paths: `C:\Users\alain\...`
+### CRITICAL: Use Specialized Tools, NOT Bash
+
+**NEVER use Bash for file operations.** Always use the dedicated Claude Code tools:
+
+| Task | ✅ USE THIS TOOL | ❌ NEVER USE BASH |
+|------|------------------|-------------------|
+| Read file contents | **Read** tool | `cat`, `type`, `Get-Content` |
+| Search in files | **Grep** tool | `grep`, `findstr`, `Select-String` |
+| Find files by pattern | **Glob** tool | `find`, `dir`, `Get-ChildItem` |
+| Edit files | **Edit** tool | `sed`, `awk`, text manipulation |
+| Create files | **Write** tool | `echo >`, `cat <<EOF` |
+
+### When to Use Bash
+
+Bash is ONLY for commands that have no tool equivalent:
+- `git` commands (commit, push, status, etc.)
+- `uv run` / `uv sync` for Python
+- `pytest` for running tests
+- Build/compile commands
+
+### Path Format
+- Always use Windows paths: `C:\Users\alain\...`
 - Do NOT use Unix paths like `/c/Users/...`
+- Quote paths with spaces: `"C:\Program Files\..."`
 
-### File Operations
-- Reading files: `Get-Content "C:\path\to\file"`
-- Listing directories: `Get-ChildItem` or `dir`
-- Current directory: `Get-Location` or `pwd`
+### Examples
+
+```python
+# ✅ CORRECT - Read file content
+# Use the Read tool with file_path="C:\Users\alain\CascadeProjects\Stamps\.env.app"
+
+# ✅ CORRECT - Search for pattern in files
+# Use the Grep tool with pattern="DETECTION" and path="C:\Users\alain\CascadeProjects\Stamps"
+
+# ✅ CORRECT - Find Python files
+# Use the Glob tool with pattern="**/*.py"
+
+# ✅ CORRECT - Run Python via Bash (no tool equivalent)
+uv run python -c "print('hello')"
+
+# ✅ CORRECT - Git operations via Bash
+git status
+git add .
+git commit -m "message"
+```
 
 ## External Resources
 

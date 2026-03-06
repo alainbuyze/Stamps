@@ -1,8 +1,78 @@
 # Stamp Collection Toolset — Implementation Plan
 
 **Created:** 2026-02-23
-**Status:** Ready for Implementation
-**Estimated Total Effort:** 38-52 hours (7 phases)
+**Last Updated:** 2026-03-06 (Roboflow detector integration)
+**Status:** Phases 1-4 Complete, Phase 5-6 Not Started
+**Estimated Remaining Effort:** 12-16 hours (Phases 5-7)
+
+---
+
+## Progress Summary (2026-03-06)
+
+| Phase | Status | Progress |
+|-------|--------|----------|
+| Phase 1: Core Infrastructure | ✅ COMPLETE | 100% |
+| Phase 2: Colnect Scraping | ✅ COMPLETE | 100% |
+| Phase 3: RAG Pipeline | ✅ COMPLETE | 100% |
+| Phase 4: Detection & Identification | ✅ COMPLETE | 100% (evolved beyond plan) |
+| Phase 5: Colnect Browser Automation | ❌ NOT STARTED | 0% |
+| Phase 6: LASTDODO Migration | ❌ NOT STARTED | 0% |
+| Phase 7: Polish & Testing | ⚠️ PARTIAL | 30% |
+
+### Architecture Evolution
+
+The vision/detection approach has evolved through multiple iterations:
+
+| Iteration | Approach | Outcome |
+|-----------|----------|---------|
+| v1 | OpenCV contour/rectangle detection | Rejected — unreliable for non-rectangular stamps and varied lighting |
+| v2 | Vision LLM detection (Groq/Claude) | Functional but slow (~2–4s/image) and costly at scale |
+| v3 ✅ | **Roboflow YOLOv8 fine-tuned detector** | Current approach — fast, accurate, handles all stamp shapes |
+
+**Current detection pipeline:**
+```
+Album page photo
+    → RoboflowAPIDetector (Roboflow hosted, free tier)
+      OR RoboflowDetector (local .pt, requires paid plan or self-trained)
+    → stamp crops
+    → Groq vision description per crop
+    → RAG search → identified stamp
+```
+
+**Detection provider selection** (`DETECTION_PRIMARY_PROVIDER` in `.env.app`):
+
+| Value | Class | When to use |
+|-------|-------|-------------|
+| `roboflow` | `RoboflowAPIDetector` | **Default** — uses Roboflow hosted API (free: 1000 calls/month) |
+| `roboflow_local` | `RoboflowDetector` | After self-training locally (see Active Learning below) |
+| `groq` | `VisionDetector` | Fallback if Roboflow unavailable |
+| `claude_haiku` | `VisionDetector` | Fallback if Groq unavailable |
+
+**Active learning loop** (improves model over time):
+1. Run pipeline on new album pages — low RAG confidence flags bad crops
+2. Upload flagged pages to Roboflow (pre-annotated with model's own predictions)
+3. Correct mistakes in Roboflow UI (polygon tool handles triangular/round stamps)
+4. Re-train: export dataset → `yolo train` locally → bump version in `.env.app`
+
+### Deprecated Components (flagged for removal)
+
+| Component | Status | Replacement |
+|-----------|--------|-------------|
+| `src/training/` | DEPRECATED | Not needed - using Vision LLM |
+| `src/vision/detection/` | DEPRECATED | `src/vision/vision_detector.py` |
+| `src/vision/detector.py` | DEPRECATED | `src/vision/vision_detector.py` |
+
+### Additional Components (beyond original plan)
+
+| Component | Purpose |
+|-----------|---------|
+| `src/feedback/` | Scan session visualization and review |
+| `src/vision/preprocessing.py` | Image preprocessing strategies |
+| `src/vision/inspection.py` | Debug inspection viewer |
+| `src/vision/identification_pipeline.py` | Complete identification orchestration |
+| `src/vision/rag_adapter.py` | Bridge to RAG search |
+| `src/vision/roboflow_detector.py` | Local YOLOv8 detector (uses downloaded .pt weights) |
+| `src/vision/roboflow_api_detector.py` | Roboflow hosted API detector (no download needed, free tier) |
 
 ---
 
@@ -10,19 +80,86 @@
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Documentation | ✅ Complete | CLAUDE.md, PRD.md fully written |
+| Documentation | ✅ Complete | CLAUDE.md, PRD.md, documentation_conventions.md |
 | Core/Logging | ✅ Complete | Production-ready with Rich integration |
-| Core/Config | ❌ Wrong | Contains settings from different project - needs rewrite |
-| Core/Errors | ⚠️ Partial | Has base exceptions, missing domain-specific ones |
-| Core/Database | ❌ Missing | SQLite operations not implemented |
-| CLI | ❌ Missing | Entry point not created |
-| Scraping | ❌ Missing | Browser, Colnect, LASTDODO modules |
-| RAG | ❌ Missing | Embeddings, Supabase, indexer, search |
-| Vision | ❌ Missing | Camera, YOLO detector, Groq describer |
-| Identification | ❌ Missing | Pipeline orchestration |
-| Migration | ❌ Missing | LASTDODO → Colnect workflow |
-| Colnect API | ❌ Missing | CDP browser automation |
-| Tests | ❌ Missing | No test suite |
+| Core/Config | ✅ Complete | Stamp-specific settings, OUTPUT_ROOT_DIR support |
+| Core/Errors | ✅ Complete | Full domain exception hierarchy |
+| Core/Database | ✅ Complete | SQLite operations with CatalogStamp, LastdodoItem, ImportTask |
+| CLI | ✅ Complete | Full command structure (scrape, rag, identify, inspect, review, train, migrate, config) |
+| Scraping | ⚠️ Partial | Browser, Colnect complete; LASTDODO missing |
+| RAG | ✅ Complete | Embeddings, Supabase, indexer, search all working |
+| Vision | ✅ Complete | Vision LLM detection, preprocessing, inspection |
+| Identification | ✅ Complete | Full pipeline with feedback system |
+| Feedback | ✅ Complete | Session visualization, missed stamps tracking |
+| Migration | ❌ Missing | LASTDODO → Colnect workflow not implemented |
+| Colnect API | ❌ Missing | CDP browser automation not implemented |
+| Tests | ⚠️ Partial | Some tests exist, need expansion |
+
+---
+
+## Next Steps (Priority Order)
+
+### Immediate: Configure and Test Roboflow Detector
+
+The Roboflow-based detector has been integrated. Complete setup:
+
+1. Add to `.env.keys`:
+   ```
+   ROBOFLOW_API_KEY=rf_xxxxxxxxxxxx
+   ```
+2. Update `.env.app` (already set to `roboflow`):
+   ```
+   ROBOFLOW_WORKSPACE=your-workspace-slug
+   ROBOFLOW_PROJECT=your-project-name
+   ROBOFLOW_VERSION=1
+   DETECTION_PRIMARY_PROVIDER=roboflow
+   ```
+3. Install SDK: `.venv\Scripts\python.exe -m pip install inference-sdk`
+4. Verify: `.venv\Scripts\python.exe -c "from src.vision.identification_pipeline import create_pipeline_from_env; p = create_pipeline_from_env(); print(type(p.vision_detector).__name__)"`
+5. Test on an album page: `uv run stamp-tools identify image --path <album_page.jpg> --mode multi`
+
+### Active Learning: Improve the Model Over Time
+
+When the model misses stamps or draws wrong boxes:
+
+```powershell
+# 1. Run pipeline — low RAG confidence crops saved to data/inspection/
+uv run stamp-tools identify image --path album_page.jpg --mode multi
+
+# 2. Upload flagged pages to Roboflow for correction
+#    (manually via Roboflow UI, or automate via RoboflowUploader)
+
+# 3. Once you have 200+ corrected annotations, export dataset:
+#    Roboflow → Versions → Export → YOLOv8 → download zip → unzip to data/roboflow_dataset/
+
+# 4. Train locally (free, no plan needed):
+.venv\Scripts\python.exe -m ultralytics train model=yolov8n.pt data=data/roboflow_dataset/data.yaml epochs=50 imgsz=640 project=models name=stamp_detector
+
+# 5. Switch to local model:
+#    .env.app: DETECTION_PRIMARY_PROVIDER=roboflow_local
+#    .env.app: ROBOFLOW_MODEL_PATH=models/stamp_detector/weights/best.pt
+```
+
+### Priority 1: Complete Phase 5 (Colnect Browser Automation)
+
+Required for adding identified stamps to collection:
+- `src/colnect_api/session.py` - CDP connection
+- `src/colnect_api/actions.py` - Add to collection action
+
+### Priority 2: Complete Phase 6 (LASTDODO Migration)
+
+One-time migration workflow:
+- `src/scraping/lastdodo.py` - Collection scraper
+- `src/migration/matcher.py` - Catalog number matching
+- `src/migration/mapper.py` - Condition mapping
+- `src/migration/importer.py` - Import orchestration
+- `src/migration/review.py` - Manual review CLI
+
+### Priority 3: Complete Phase 7 (Polish & Testing)
+
+- Expand test suite
+- Add `__main__` blocks to all modules per documentation conventions
+- Update module docstrings per documentation conventions
 
 ---
 
@@ -254,12 +391,12 @@ LOG_BACKUP_COUNT=3
 
 ### Phase 1 Deliverables
 
-- [ ] `src/core/config.py` - Stamp-specific settings
-- [ ] `src/core/errors.py` - All domain exceptions
-- [ ] `src/core/database.py` - SQLite operations
-- [ ] `src/cli.py` - Click CLI skeleton
-- [ ] `.env.app` - Fixed application defaults
-- [ ] `stamp-tools init` command working
+- [x] `src/core/config.py` - Stamp-specific settings ✅
+- [x] `src/core/errors.py` - All domain exceptions ✅
+- [x] `src/core/database.py` - SQLite operations ✅
+- [x] `src/cli.py` - Click CLI skeleton ✅
+- [x] `.env.app` - Fixed application defaults ✅
+- [x] `stamp-tools init` command working ✅
 
 ---
 
@@ -333,12 +470,12 @@ def scrape_colnect(themes, country, year, resume):
 
 ### Phase 2 Deliverables
 
-- [ ] `src/scraping/__init__.py`
-- [ ] `src/scraping/browser.py` - Playwright manager
-- [ ] `src/scraping/colnect.py` - Colnect scraper
-- [ ] `stamp-tools scrape colnect` command
-- [ ] Checkpoint/resume support
-- [ ] Rate limiting (1.5s delay)
+- [x] `src/scraping/__init__.py` ✅
+- [x] `src/scraping/browser.py` - Playwright manager ✅
+- [x] `src/scraping/colnect.py` - Colnect scraper ✅
+- [x] `stamp-tools scrape colnect` command ✅
+- [x] Checkpoint/resume support ✅
+- [x] Rate limiting (1.5s delay) ✅
 
 ---
 
@@ -484,14 +621,14 @@ def rag_stats():
 
 ### Phase 3 Deliverables
 
-- [ ] `src/vision/__init__.py`
-- [ ] `src/vision/describer.py` - Groq vision integration
-- [ ] `src/rag/__init__.py`
-- [ ] `src/rag/embeddings.py` - OpenAI embeddings
-- [ ] `src/rag/supabase_client.py` - Supabase operations
-- [ ] `src/rag/indexer.py` - Indexing pipeline
-- [ ] `src/rag/search.py` - Similarity search
-- [ ] `stamp-tools rag index|search|stats` commands
+- [x] `src/vision/__init__.py` ✅
+- [x] `src/vision/describer.py` - Groq vision integration ✅
+- [x] `src/rag/__init__.py` ✅
+- [x] `src/rag/embeddings.py` - OpenAI embeddings ✅
+- [x] `src/rag/supabase_client.py` - Supabase operations ✅
+- [x] `src/rag/indexer.py` - Indexing pipeline ✅
+- [x] `src/rag/search.py` - Similarity search ✅
+- [x] `stamp-tools rag index|search|stats` commands ✅
 
 ---
 
@@ -619,12 +756,22 @@ def identify_image(path, add_to_colnect):
 
 ### Phase 4 Deliverables
 
-- [ ] `src/vision/camera.py` - OpenCV capture
-- [ ] `src/vision/detector.py` - YOLO detection
-- [ ] `src/identification/__init__.py`
-- [ ] `src/identification/identifier.py` - Pipeline orchestration
-- [ ] `src/identification/results.py` - Rich display
-- [ ] `stamp-tools identify camera|image` commands
+- [x] `src/vision/camera.py` - OpenCV capture ✅
+- [x] `src/vision/detector.py` - YOLO detection ✅ (deprecated, replaced)
+- [x] `src/vision/vision_detector.py` - Vision LLM detection ✅ (fallback provider)
+- [x] `src/vision/roboflow_detector.py` - Local YOLOv8 via Roboflow weights ✅ (`roboflow_local` provider)
+- [x] `src/vision/roboflow_api_detector.py` - Roboflow hosted inference ✅ (`roboflow` provider, default)
+- [x] `src/vision/preprocessing.py` - Image preprocessing ✅
+- [x] `src/vision/identification_pipeline.py` - Full pipeline ✅
+- [x] `src/vision/inspection.py` - Debug inspection ✅
+- [x] `src/identification/__init__.py` ✅
+- [x] `src/identification/identifier.py` - Pipeline orchestration ✅
+- [x] `src/identification/results.py` - Rich display ✅
+- [x] `src/feedback/` - Session feedback system ✅
+- [x] `stamp-tools identify camera|image` commands ✅
+- [x] `stamp-tools inspect` commands ✅
+- [x] `stamp-tools review` commands ✅
+- [ ] Active learning upload integration ⚠️ Manual for now (Roboflow UI)
 
 ---
 
@@ -679,10 +826,10 @@ class ColnectActions:
 
 ### Phase 5 Deliverables
 
-- [ ] `src/colnect_api/__init__.py`
-- [ ] `src/colnect_api/session.py` - CDP connection
-- [ ] `src/colnect_api/actions.py` - Collection operations
-- [ ] Integration with identification pipeline
+- [ ] `src/colnect_api/__init__.py` ❌ NOT STARTED
+- [ ] `src/colnect_api/session.py` - CDP connection ❌
+- [ ] `src/colnect_api/actions.py` - Collection operations ❌
+- [ ] Integration with identification pipeline ❌
 
 ---
 
@@ -818,14 +965,14 @@ def migrate_status():
 
 ### Phase 6 Deliverables
 
-- [ ] `src/scraping/lastdodo.py` - Collection scraper
-- [ ] `src/migration/__init__.py`
-- [ ] `src/migration/matcher.py` - Catalog matching
-- [ ] `src/migration/mapper.py` - Condition mapping
-- [ ] `src/migration/importer.py` - Import orchestration
-- [ ] `src/migration/review.py` - Manual review CLI
-- [ ] `stamp-tools scrape lastdodo` command
-- [ ] `stamp-tools migrate match|import|review|status` commands
+- [ ] `src/scraping/lastdodo.py` - Collection scraper ❌ NOT STARTED
+- [ ] `src/migration/__init__.py` ❌
+- [ ] `src/migration/matcher.py` - Catalog matching ❌
+- [ ] `src/migration/mapper.py` - Condition mapping ❌
+- [ ] `src/migration/importer.py` - Import orchestration ❌
+- [ ] `src/migration/review.py` - Manual review CLI ❌
+- [ ] `stamp-tools scrape lastdodo` command ❌
+- [ ] `stamp-tools migrate match|import|review|status` commands ❌
 
 ---
 
@@ -879,11 +1026,12 @@ def config_validate():
 
 ### Phase 7 Deliverables
 
-- [ ] Complete test suite with pytest
-- [ ] `stamp-tools config show|validate` commands
-- [ ] All docstrings complete
-- [ ] Help text for all commands
-- [ ] Edge case handling
+- [ ] Complete test suite with pytest ⚠️ PARTIAL (some tests exist)
+- [x] `stamp-tools config show|validate` commands ✅
+- [ ] All docstrings complete ⚠️ PARTIAL (conventions defined, need implementation)
+- [x] Help text for all commands ✅
+- [ ] Edge case handling ⚠️ PARTIAL
+- [ ] Add `__main__` blocks to all modules ❌ (new requirement per documentation conventions)
 
 ---
 
@@ -935,10 +1083,13 @@ Phase 7 (Polish)
 
 ### Phase 4 Files
 16. `src/vision/camera.py`
-17. `src/vision/detector.py`
-18. `src/identification/__init__.py`
-19. `src/identification/identifier.py`
-20. `src/identification/results.py`
+17. `src/vision/detector.py` (deprecated)
+18. `src/vision/vision_detector.py` (LLM fallback)
+19. `src/vision/roboflow_detector.py` (local .pt)
+20. `src/vision/roboflow_api_detector.py` ✅ (hosted API, default)
+21. `src/identification/__init__.py`
+22. `src/identification/identifier.py`
+23. `src/identification/results.py`
 
 ### Phase 5 Files
 21. `src/colnect_api/__init__.py`
@@ -964,7 +1115,9 @@ Phase 7 (Polish)
 |------|------------|
 | Colnect page structure changes | Modular selectors in separate config, easy to update |
 | Groq rate limits (30/min) | Built-in rate limiter with exponential backoff |
-| YOLOv8 poor detection | Pre-trained model first, custom training optional (Could Have) |
+| Roboflow API call limit (1000/month free) | Export dataset + retrain locally → switch to `roboflow_local` provider |
+| Roboflow paid plan needed for weight download | Self-train from exported dataset using `yolo train` (free, ~20 min) |
+| Stamp detector missing non-rectangular shapes | Polygon annotations in Roboflow handle triangles and round stamps |
 | RAG match quality | Tune prompt, try larger Groq model if needed |
 | Chrome CDP issues | Clear error messages, setup documentation |
 | Supabase free tier | Monitor usage (~350MB expected, limit 500MB) |
@@ -973,10 +1126,27 @@ Phase 7 (Polish)
 
 ## Success Criteria
 
-- [ ] `stamp-tools init` creates database, downloads YOLO, verifies APIs
-- [ ] `stamp-tools scrape colnect` scrapes ~50,000 space stamps with checkpoint
-- [ ] `stamp-tools rag index` indexes all stamps in ~6-16 hours
-- [ ] `stamp-tools identify camera` identifies stamps with >80% accuracy
-- [ ] `stamp-tools migrate import --dry-run` matches 80%+ of LASTDODO items
-- [ ] All tests pass
-- [ ] Monthly cost < €1
+- [x] `stamp-tools init` creates database, downloads YOLO, verifies APIs ✅
+- [x] `stamp-tools scrape colnect` scrapes ~50,000 space stamps with checkpoint ✅
+- [x] `stamp-tools rag index` indexes all stamps in ~6-16 hours ✅
+- [ ] `stamp-tools identify camera` identifies stamps with >80% accuracy ⚠️ NEEDS VERIFICATION
+- [ ] `stamp-tools migrate import --dry-run` matches 80%+ of LASTDODO items ❌ NOT IMPLEMENTED
+- [ ] All tests pass ⚠️ PARTIAL
+- [x] Monthly cost < €1 ✅
+
+---
+
+## Recommended Next Action
+
+**Verify identification pipeline works end-to-end:**
+
+```powershell
+# Test with a sample stamp image
+uv run stamp-tools identify image --path <path_to_test_image> --mode single
+
+# If working, test multi-stamp detection
+uv run stamp-tools identify image --path <album_page_image> --mode multi
+```
+
+If identification works → proceed to Phase 5 (Colnect Browser Automation)
+If identification fails → debug Vision LLM integration first

@@ -1,14 +1,296 @@
-"""Vision LLM-based stamp detection.
+"""Vision LLM-based stamp detection system.
 
-Uses Groq as primary detector with Claude Haiku fallback.
-Supports inspection of all intermediate steps.
+This module provides AI-powered stamp detection using Large Language Models (LLMs)
+with computer vision capabilities. It uses Groq as the primary provider with Claude
+Haiku as fallback, supporting comprehensive inspection of all intermediate steps.
 
-Classes access settings directly via get_settings() - no config parameters.
+## Architecture Overview
+
+The Vision LLM detector operates as a two-stage system:
+1. **Preprocessing**: Image enhancement and optimization for LLM consumption
+2. **LLM Detection**: AI-powered stamp detection using vision models
+
+## Function Tree
+
+### Core Classes
+- `VisionDetector` - Main detector class with LLM integration
+- `DetectionResult` - Container for detection results and metadata
+- `VisionDetection` - Individual stamp detection with confidence and geometry
+
+### Data Classes
+- `DetectionConfig` - Configuration for detection parameters
+- `LLMResponse` - Raw LLM response parsing and validation
+
+### Factory Functions
+- `create_vision_detector_from_env()` - Create detector from environment settings
+
+### Test Functions (Main)
+- `_create_single_stamp_test()` - Generate single stamp test image
+- `_create_multiple_stamps_test()` - Generate multi-stamp album page
+- `_create_complex_layout_test()` - Generate complex album layout
+
+## Configuration Parameters
+
+The detector uses environment-based configuration via `get_settings()`:
+
+### LLM Provider Settings
+- `GROQ_API_KEY` - API key for Groq (primary provider)
+- `ANTHROPIC_API_KEY` - API key for Claude Haiku (fallback)
+- `GROQ_MODEL` - Model name for Groq (default: "llama-3.2-90b-vision-preview")
+- `GROQ_RATE_LIMIT_PER_MINUTE` - API rate limiting (default: 30)
+
+### Detection Settings
+- `VISION_PROMPT_FILE` - Path to detection prompt template
+- `DETECTION_NMS_IOU_THRESHOLD` - IoU threshold for non-maximum suppression
+- `DETECTION_CONFIDENCE_THRESHOLD` - Minimum confidence for detections
+
+### Inspection Settings
+- `INSPECTION_SAVE_INTERMEDIATES` - Save intermediate processing results
+- `INSPECTION_PATH` - Directory for inspection outputs
+
+## Usage Examples
+
+### Basic Usage
+```python
+from src.vision.vision_detector import create_vision_detector_from_env
+
+# Create detector with environment settings
+detector = create_vision_detector_from_env()
+
+# Detect stamps in image
+result = detector.detect(image)
+
+# Process results
+for detection in result.detections:
+    print(f"Stamp at {detection.center} with confidence {detection.confidence}")
+```
+
+### Advanced Usage with Custom Configuration
+```python
+from src.vision.vision_detector import VisionDetector
+from src.core.config import get_settings
+
+# Create detector with explicit clients
+detector = VisionDetector(
+    groq_client=groq_client,
+    anthropic_client=anthropic_client
+)
+
+# Run detection with fallback monitoring
+result = detector.detect(image)
+
+# Check if fallback was triggered
+if result.fallback_triggered:
+    print(f"Fallback used: {result.fallback_reason}")
+    print(f"Primary provider: {result.provider_used}")
+```
+
+### Inspection and Debugging
+```python
+# Enable inspection mode
+settings = get_settings()
+settings.INSPECTION_SAVE_INTERMEDIATES = True
+
+# Run detection - all intermediates will be saved
+result = detector.detect(image)
+
+# Inspection files are saved to settings.INSPECTION_PATH
+# - original.jpg: Input image
+# - annotated.jpg: Image with detection boxes
+# - result.json: Complete detection results
+# - preprocessing.json: Preprocessing metadata
+```
+
+### Batch Processing
+```python
+import cv2
+from pathlib import Path
+
+detector = create_vision_detector_from_env()
+
+# Process multiple images
+image_dir = Path("stamp_images")
+for image_path in image_dir.glob("*.jpg"):
+    image = cv2.imread(str(image_path))
+    result = detector.detect(image)
+    
+    print(f"{image_path.name}: {len(result.detections)} stamps detected")
+    
+    # Save results
+    output_path = image_dir / "results" / f"{image_path.stem}_detections.json"
+    output_path.parent.mkdir(exist_ok=True)
+    
+    with open(output_path, 'w') as f:
+        json.dump(result.to_dict(), f, indent=2)
+```
+
+### Error Handling and Fallbacks
+```python
+try:
+    detector = create_vision_detector_from_env()
+    result = detector.detect(image)
+    
+    # Check detection quality
+    if len(result.detections) == 0:
+        print("No stamps detected - trying different preprocessing")
+        # Retry with different settings
+        
+except Exception as e:
+    logger.error(f"Detection failed: {e}")
+    # Implement fallback logic
+```
+
+## Detection Process
+
+### 1. Preprocessing Phase
+- **Image Validation**: Check image format and dimensions
+- **Size Optimization**: Resize for LLM compatibility (max 2048px)
+- **Quality Enhancement**: Apply contrast and clarity improvements
+- **Format Conversion**: Ensure proper color space and encoding
+
+### 2. LLM Inference Phase
+- **Prompt Construction**: Build detection prompt with clear instructions
+- **API Communication**: Send image to LLM provider
+- **Response Parsing**: Extract and validate JSON detection data
+- **Fallback Handling**: Switch to backup provider if primary fails
+
+### 3. Post-Processing Phase
+- **Coordinate Conversion**: Convert percentage to pixel coordinates
+- **Non-Maximum Suppression**: Remove overlapping detections
+- **Confidence Filtering**: Apply minimum confidence thresholds
+- **Result Validation**: Ensure detection quality and consistency
+
+## Output Format
+
+### DetectionResult Structure
+```python
+@dataclass
+class DetectionResult:
+    detections: List[VisionDetection]      # All detected stamps
+    processing_time_ms: int                # Total processing time
+    provider_used: str                     # LLM provider used
+    fallback_triggered: bool              # Whether fallback was used
+    fallback_reason: Optional[str]         # Reason for fallback
+    primary_latency_ms: int               # Primary provider latency
+    preprocessing_metadata: dict           # Preprocessing information
+```
+
+### VisionDetection Structure
+```python
+@dataclass
+class VisionDetection:
+    box_percentage: List[float]           # Bounding box in percentages [x1,y1,x2,y2]
+    box_pixels: Tuple[int, int, int, int]  # Bounding box in pixels (x1,y1,x2,y2)
+    confidence: str                       # Confidence level (high/medium/low)
+    shape_type: str                       # Shape classification
+    center: Tuple[int, int]              # Center coordinates (x,y)
+    area: int                             # Bounding box area in pixels
+```
+
+## Testing
+
+The module includes comprehensive testing capabilities:
+
+### Direct Module Testing
+```bash
+python -m src.vision.vision_detector
+```
+
+This runs three test scenarios:
+1. **Single Stamp**: Tests basic detection with one stamp
+2. **Multiple Stamps**: Tests multi-stamp album page
+3. **Complex Layout**: Tests challenging album arrangements
+
+### Integration Testing
+```python
+# Test with real stamp images
+detector = create_vision_detector_from_env()
+test_image = cv2.imread("real_stamp_album.jpg")
+result = detector.detect(test_image)
+
+# Validate results
+assert len(result.detections) > 0, "No stamps detected"
+assert result.provider_used in ["groq", "anthropic"], "Unknown provider"
+```
+
+## Performance Considerations
+
+### Rate Limiting
+- Groq API: 30 requests/minute (default)
+- Implement request queuing for batch processing
+- Use exponential backoff for rate limit errors
+
+### Image Optimization
+- Maximum dimension: 2048 pixels
+- Recommended size: 1024x1024 for balance
+- File size: Keep under 5MB for reliable processing
+
+### Memory Management
+- Large images are automatically resized
+- Intermediate results are cleaned up after processing
+- Inspection data can be disabled to save space
+
+## Troubleshooting
+
+### Common Issues
+
+1. **API Key Errors**
+   ```
+   Error: Invalid API key
+   Solution: Check GROQ_API_KEY and ANTHROPIC_API_KEY in .env.keys
+   ```
+
+2. **Rate Limiting**
+   ```
+   Error: Rate limit exceeded
+   Solution: Reduce request frequency or upgrade API plan
+   ```
+
+3. **Image Size Issues**
+   ```
+   Error: Image too large
+   Solution: Resize image to under 2048px maximum dimension
+   ```
+
+4. **No Detections**
+   ```
+   Issue: Empty results
+   Solutions:
+   - Check image quality and lighting
+   - Verify stamps are clearly visible
+   - Try different preprocessing settings
+   - Review prompt template
+   ```
+
+### Debug Mode
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+# Enable detailed logging
+detector = create_vision_detector_from_env()
+result = detector.detect(image)  # Will show detailed processing steps
+```
+
+## Dependencies
+
+### Required Packages
+- `cv2` - OpenCV for image processing
+- `numpy` - Numerical operations
+- `groq` - Groq API client
+- `anthropic` - Anthropic API client (optional fallback)
+
+### Optional Packages
+- `PIL` - Additional image format support
+- `requests` - HTTP client for API calls
+
+Classes access settings directly via get_settings() - no config parameters needed for basic usage.
 """
 
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Any
@@ -580,13 +862,30 @@ class VisionDetector:
         return annotated
 
 
-def create_vision_detector_from_env() -> VisionDetector:
-    """Create vision detector with API clients.
+def create_vision_detector_from_env():
+    """Routes to RoboflowDetector or VisionDetector based on DETECTION_PRIMARY_PROVIDER.
 
-    All configuration is accessed directly via get_settings() inside VisionDetector.
-    This factory only initializes the API clients.
+    When DETECTION_PRIMARY_PROVIDER=roboflow, returns a RoboflowDetector that
+    runs fully offline using a locally cached YOLOv8 .pt file.
+    Otherwise returns the LLM-based VisionDetector (Groq / Claude).
+    Both share the same detect(image) -> DetectionResult interface.
     """
     settings = get_settings()
+
+    # ── Roboflow local YOLOv8 (requires paid plan to download weights) ────────
+    if settings.DETECTION_PRIMARY_PROVIDER == "roboflow_local":
+        logger.info("Using RoboflowDetector (local YOLOv8)")
+        from .roboflow_detector import create_roboflow_detector
+        return create_roboflow_detector()
+
+    # ── Roboflow hosted API (free plan, 1000 calls/month) ─────────────────────
+    if settings.DETECTION_PRIMARY_PROVIDER == "roboflow":
+        logger.info("Using RoboflowAPIDetector (hosted inference)")
+        from .roboflow_api_detector import RoboflowAPIDetector
+        return RoboflowAPIDetector()
+
+    # ── LLM-based (Groq / Claude) ─────────────────────────────────────────────
+    logger.info(f"Using VisionDetector (provider={settings.DETECTION_PRIMARY_PROVIDER})")
 
     # Initialize API clients
     groq_client = None
@@ -612,3 +911,254 @@ def create_vision_detector_from_env() -> VisionDetector:
         groq_client=groq_client,
         anthropic_client=anthropic_client,
     )
+
+
+if __name__ == "__main__":
+    """Test the Vision LLM detector with hardcoded input."""
+    import logging
+    from pathlib import Path
+    
+    # Setup logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    print("=== Vision LLM Detector Test ===")
+    print("Testing Vision LLM-based stamp detection with hardcoded input...")
+    
+    try:
+        # Create detector
+        detector = create_vision_detector_from_env()
+        print("✓ Vision LLM Detector created")
+        
+        # Create test scenarios
+        test_scenarios = [
+            {
+                "name": "Single Stamp",
+                "description": "Test with a single stamp-like object",
+                "create_image": lambda: _create_single_stamp_test()
+            },
+            {
+                "name": "Multiple Stamps",
+                "description": "Test with multiple stamps in album layout",
+                "create_image": lambda: _create_multiple_stamps_test()
+            },
+            {
+                "name": "Complex Layout",
+                "description": "Test with complex album page layout",
+                "create_image": lambda: _create_complex_layout_test()
+            }
+        ]
+        
+        # Run each test scenario
+        for scenario in test_scenarios:
+            print(f"\n🖼️  Testing: {scenario['name']}")
+            print(f"   {scenario['description']}")
+            
+            # Create test image
+            test_image, expected_count = scenario["create_image"]()
+            
+            # Save test image
+            test_path = Path(f"test_vision_llm_{scenario['name'].lower().replace(' ', '_')}.jpg")
+            cv2.imwrite(str(test_path), test_image)
+            print(f"   Created test image: {test_path}")
+            print(f"   Image size: {test_image.shape}")
+            print(f"   Expected stamps: {expected_count}")
+            
+            # Run detection
+            print("   🔍 Running Vision LLM detection...")
+            start_time = time.time()
+            
+            result = detector.detect(test_image)
+            
+            end_time = time.time()
+            print(f"   ✓ Detection completed in {end_time - start_time:.2f} seconds")
+            
+            # Display results
+            print(f"   📊 Detection Results:")
+            print(f"      Total detections: {len(result.detections)}")
+            print(f"      Processing time: {result.processing_time_ms}ms")
+            print(f"      Provider used: {result.provider_used}")
+            
+            if result.fallback_triggered:
+                print(f"      ⚠️  Fallback triggered: {result.fallback_reason}")
+            
+            if result.detections:
+                print(f"      🎯 Detected stamps:")
+                for i, det in enumerate(result.detections, 1):
+                    print(f"         {i}. Confidence: {det.confidence}")
+                    print(f"            Box (%): {det.box_percentage}")
+                    print(f"            Box (px): {det.box_pixels}")
+                    print(f"            Shape: {det.shape_type}")
+            else:
+                print(f"      No stamps detected")
+            
+            # Calculate success rate
+            success_rate = (len(result.detections) / expected_count) * 100 if expected_count > 0 else 0
+            print(f"   📈 Success rate: {success_rate:.1f}% ({len(result.detections)}/{expected_count})")
+            
+            # Save inspection results
+            inspection_id = f"vision_llm_test_{scenario['name'].lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            detector._save_inspection(test_image, result, inspection_id)
+            print(f"   💾 Inspection saved to: {detector.inspection_dir / inspection_id}")
+            
+            # Clean up test image
+            if test_path.exists():
+                test_path.unlink()
+                print(f"   🧹 Cleaned up test image: {test_path}")
+        
+        print("\n✅ All Vision LLM detector tests completed!")
+        
+    except Exception as e:
+        print(f"\n❌ Vision LLM detector test failed: {e}")
+        logger.exception("Vision LLM detector test failed")
+        import sys
+        sys.exit(1)
+
+
+def _create_single_stamp_test():
+    """Create a test image with a single stamp-like object."""
+    # Create 400x300 image with single stamp
+    image = np.zeros((300, 400, 3), dtype=np.uint8)
+    
+    # Add a rectangular stamp with some content
+    stamp_x, stamp_y, stamp_w, stamp_h = 100, 80, 200, 140
+    
+    # Stamp background
+    image[stamp_y:stamp_y+stamp_h, stamp_x:stamp_x+stamp_w] = [200, 200, 220]
+    
+    # Add some "stamp content" - rectangles and text-like patterns
+    # Border
+    border_color = [50, 50, 50]
+    cv2.rectangle(image, (stamp_x+5, stamp_y+5), (stamp_x+stamp_w-5, stamp_y+stamp_h-5), border_color, 3)
+    
+    # Central design
+    center_x, center_y = stamp_x + stamp_w//2, stamp_y + stamp_h//2
+    cv2.circle(image, (center_x, center_y), 30, [100, 100, 150], -1)
+    
+    # Text lines (simulated)
+    for i in range(3):
+        y_pos = center_y - 20 + i * 20
+        cv2.line(image, (stamp_x+20, y_pos), (stamp_x+stamp_w-20, y_pos), [80, 80, 80], 2)
+    
+    return image, 1
+
+
+def _create_multiple_stamps_test():
+    """Create a test image with multiple stamps in album layout."""
+    # Create 600x400 album page
+    image = np.ones((400, 600, 3), dtype=np.uint8) * 240  # Light background
+    
+    # Define stamp positions and sizes
+    stamps = [
+        {"pos": (50, 50), "size": (120, 80), "color": [200, 180, 160]},
+        {"pos": (200, 50), "size": (120, 80), "color": [180, 200, 160]},
+        {"pos": (350, 50), "size": (120, 80), "color": [160, 180, 200]},
+        {"pos": (50, 150), "size": (100, 70), "color": [200, 160, 180]},
+        {"pos": (170, 150), "size": (100, 70), "color": [180, 200, 180]},
+        {"pos": (290, 150), "size": (100, 70), "color": [200, 200, 160]},
+        {"pos": (50, 240), "size": (140, 90), "color": [160, 160, 200]},
+        {"pos": (210, 240), "size": (140, 90), "color": [200, 180, 180]},
+        {"pos": (370, 240), "size": (140, 90), "color": [180, 200, 200]},
+    ]
+    
+    # Draw each stamp
+    for stamp in stamps:
+        x, y = stamp["pos"]
+        w, h = stamp["size"]
+        color = stamp["color"]
+        
+        # Stamp background
+        image[y:y+h, x:x+w] = color
+        
+        # Border
+        cv2.rectangle(image, (x+3, y+3), (x+w-3, y+h-3), [50, 50, 50], 2)
+        
+        # Simple design
+        center_x, center_y = x + w//2, y + h//2
+        cv2.circle(image, (center_x, center_y), min(w, h)//6, [100, 100, 100], -1)
+    
+    return image, len(stamps)
+
+
+def _create_complex_layout_test():
+    """Create a test image with complex album page layout."""
+    # Create 800x600 album page
+    image = np.ones((600, 800, 3), dtype=np.uint8) * 235  # Light background
+    
+    # Add album page lines/borders
+    cv2.rectangle(image, (10, 10), (790, 590), [180, 180, 180], 2)
+    
+    # Complex stamp arrangement with different sizes and orientations
+    stamps = [
+        # Row 1 - mixed sizes
+        {"pos": (30, 30), "size": (100, 60), "color": [220, 200, 180]},
+        {"pos": (150, 30), "size": (150, 90), "color": [200, 220, 180]},
+        {"pos": (320, 30), "size": (80, 50), "color": [180, 200, 220]},
+        {"pos": (420, 30), "size": (120, 70), "color": [220, 180, 200]},
+        {"pos": (560, 30), "size": (110, 65), "color": [200, 200, 180]},
+        
+        # Row 2 - larger stamps
+        {"pos": (30, 140), "size": (180, 120), "color": [180, 220, 200]},
+        {"pos": (230, 140), "size": (160, 110), "color": [220, 200, 220]},
+        {"pos": (410, 140), "size": (140, 100), "color": [200, 180, 180]},
+        {"pos": (570, 140), "size": (170, 115), "color": [180, 180, 220]},
+        
+        # Row 3 - mixed small stamps
+        {"pos": (30, 280), "size": (90, 55), "color": [200, 220, 220]},
+        {"pos": (140, 280), "size": (85, 50), "color": [220, 220, 200]},
+        {"pos": (245, 280), "size": (95, 58), "color": [220, 200, 200]},
+        {"pos": (360, 280), "size": (80, 48), "color": [200, 200, 220]},
+        {"pos": (460, 280), "size": (88, 52), "color": [200, 220, 180]},
+        {"pos": (570, 280), "size": (92, 56), "color": [220, 180, 220]},
+        
+        # Row 4 - special stamps
+        {"pos": (30, 360), "size": (200, 130), "color": [180, 200, 180]},
+        {"pos": (250, 360), "size": (130, 85), "color": [200, 180, 200]},
+        {"pos": (400, 360), "size": (110, 75), "color": [180, 220, 220]},
+        {"pos": (530, 360), "size": (190, 125), "color": [220, 200, 180]},
+        
+        # Row 5 - bottom row
+        {"pos": (30, 510), "size": (100, 60), "color": [200, 200, 200]},
+        {"pos": (150, 510), "size": (120, 70), "color": [180, 200, 200]},
+        {"pos": (290, 510), "size": (110, 65), "color": [200, 180, 200]},
+        {"pos": (420, 510), "size": (130, 75), "color": [200, 200, 180]},
+        {"pos": (570, 510), "size": (115, 68), "color": [220, 220, 220]},
+    ]
+    
+    # Draw each stamp with details
+    for stamp in stamps:
+        x, y = stamp["pos"]
+        w, h = stamp["size"]
+        color = stamp["color"]
+        
+        # Stamp background
+        image[y:y+h, x:x+w] = color
+        
+        # Border
+        cv2.rectangle(image, (x+2, y+2), (x+w-2, y+h-2), [60, 60, 60], 2)
+        
+        # Inner border
+        cv2.rectangle(image, (x+5, y+5), (x+w-5, y+h-5), [120, 120, 120], 1)
+        
+        # Central design (varies by size)
+        center_x, center_y = x + w//2, y + h//2
+        radius = min(w, h) // 8
+        
+        # Different designs for visual variety
+        design_type = (x + y) % 3
+        if design_type == 0:
+            cv2.circle(image, (center_x, center_y), radius, [80, 80, 80], -1)
+        elif design_type == 1:
+            cv2.rectangle(image, (center_x-radius, center_y-radius), 
+                          (center_x+radius, center_y+radius), [80, 80, 80], -1)
+        else:
+            # Diamond
+            points = np.array([
+                [center_x, center_y-radius],
+                [center_x+radius, center_y],
+                [center_x, center_y+radius],
+                [center_x-radius, center_y]
+            ], np.int32)
+            cv2.fillPoly(image, [points], [80, 80, 80])
+    
+    return image, len(stamps)
+

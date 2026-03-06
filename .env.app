@@ -135,3 +135,25 @@ LOG_BACKUP_COUNT=5
 # Output Settings
 # =============================================================================
 OUTPUT_DIR=data
+
+# =============================================================================
+# Roboflow Stamp Detector (local YOLOv8 model)
+# =============================================================================
+
+# Your workspace and project slugs from https://app.roboflow.com
+ROBOFLOW_WORKSPACE=stamp-detector-wyo9i/1
+ROBOFLOW_PROJECT=stamp-detector
+ROBOFLOW_VERSION=1
+
+# Local path where the downloaded .pt file is cached (auto-downloaded on first run)
+ROBOFLOW_MODEL_PATH=models/roboflow_stamp_detector.pt
+
+# Detection confidence threshold (lower = more detections, more false positives)
+ROBOFLOW_CONFIDENCE_THRESHOLD=0.35
+
+# Set to 'roboflow' to use local model as primary detector
+# DETECTION_PRIMARY_PROVIDER=roboflow_local
+# Options: roboflow | groq | claude_haiku | claude_sonnet
+DETECTION_PRIMARY_PROVIDER=roboflow
+DETECTION_FALLBACK_PROVIDER=claude_haiku
+DETECTION_CLAUDE_MODEL_SONNET=claude-sonnet-4-20250514

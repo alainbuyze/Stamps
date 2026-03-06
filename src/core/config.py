@@ -125,11 +125,11 @@ class Settings(BaseSettings):
     # Vision LLM Detection Settings
     # ==========================================================================
     DETECTION_PRIMARY_PROVIDER: str = Field(
-        default="groq",
-        description="Primary detection provider: groq | claude_haiku | claude_sonnet",
+        default="roboflow",
+        description="Primary detection provider: roboflow | roboflow_local | groq | claude_haiku | claude_sonnet",
     )
     DETECTION_FALLBACK_PROVIDER: str = Field(
-        default="claude_haiku",
+        default="groq",
         description="Fallback detection provider: groq | claude_haiku | claude_sonnet",
     )
     DETECTION_ENABLE_FALLBACK: bool = Field(
@@ -181,7 +181,36 @@ class Settings(BaseSettings):
         description="Max tokens for Claude detection response",
     )
 
+
     # ==========================================================================
+    # Roboflow Stamp Detector Settings
+    # ==========================================================================
+    ROBOFLOW_API_KEY: Optional[str] = Field(
+        default=None,
+        description='Roboflow API key — set in .env.keys',
+    )
+    ROBOFLOW_WORKSPACE: str = Field(
+        default='',
+        description='Roboflow workspace slug (visible in your project URL)',
+    )
+    ROBOFLOW_PROJECT: str = Field(
+        default='stamp-detector',
+        description='Roboflow project name',
+    )
+    ROBOFLOW_VERSION: int = Field(
+        default=1,
+        description='Roboflow model version to use/download',
+    )
+    ROBOFLOW_MODEL_PATH: str = Field(
+        default='models/roboflow_stamp_detector.pt',
+        description='Local path where downloaded .pt weights are cached',
+    )
+    ROBOFLOW_CONFIDENCE_THRESHOLD: float = Field(
+        default=0.35,
+        description='Minimum detection confidence for Roboflow model (0-1)',
+    )
+
+        # ==========================================================================
     # Preprocessing Settings
     # ==========================================================================
     PREPROCESSING_STRATEGY: str = Field(

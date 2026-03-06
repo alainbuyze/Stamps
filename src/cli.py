@@ -1,10 +1,486 @@
-"""Click CLI entry point for Stamp Collection Toolset.
+"""Stamp Collection Toolset CLI - AI-powered stamp management system.
+
+This comprehensive CLI tool provides everything you need to build a searchable
+stamp collection database using AI-powered identification and web scraping.
+
+## Command Groups Quick Reference
+
+- **init** - System initialization and setup
+- **scrape** - Web scraping (Colnect, LASTDODO)
+- **rag** - RAG database management (index, search, stats)
+- **identify** - Stamp identification (camera, image)
+- **review** - Review scan sessions and missed stamps
+- **inspect** - Technical inspection of vision pipeline results
+- **train** - YOLO model training for stamp detection
+- **migrate** - Collection migration from other platforms
+- **config** - Configuration management and validation
+
+## Global Parameters
+
+| Parameter | Description | Available Across |
+|-----------|-------------|------------------|
+| `--debug` | Enable debug logging | All commands |
+| `--help` | Show help message | All commands |
+
+## Command Parameters Reference
+
+### init
+No parameters available.
+
+### scrape
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| `--themes` | string | Comma-separated themes to scrape | `--themes "Space,Rockets"` |
+| `--country` | string | Filter by country | `--country "USA"` |
+| `--year` | int | Filter by year | `--year 2020` |
+| `--resume` | flag | Resume from checkpoint | `--resume` |
+| `--dry-run` | flag | Preview without saving | `--dry-run` |
+| `--limit` | int | Limit number of stamps | `--limit 100` |
+
+### rag
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| **init** | | | |
+| No parameters | | | |
+| **index** | | | |
+| `--country` | string | Filter by country | `--country "Japan"` |
+| `--year` | int | Filter by year | `--year 2019` |
+| `--regenerate` | flag | Regenerate descriptions | `--regenerate` |
+| `--batch` | flag | Use batch processing | `--batch` |
+| **search** | | | |
+| `--query` | string (required) | Search query | `--query "Apollo mission"` |
+| `--limit` | int | Number of results | `--limit 10` |
+| `--country` | string | Filter by country | `--country "Russia"` |
+| `--year` | int | Filter by year | `--year 1969` |
+| **stats** | | | |
+| No parameters | | | |
+
+### identify
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| **camera** | | | |
+| `--mode` | choice | Detection mode (auto/single/multi) | `--mode single` |
+| `--add-to-colnect` | flag | Auto-add matches to Colnect | `--add-to-colnect` |
+| `--camera` | int | Camera device index | `--camera 1` |
+| **image** | | | |
+| `--path` | path (required) | Image file path | `--path "stamp.jpg"` |
+| `--mode` | choice | Detection mode (auto/single/multi) | `--mode multi` |
+| `--add-to-colnect` | flag | Auto-add matches to Colnect | `--add-to-colnect` |
+
+### review
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| **sessions** | | | |
+| `--limit` | int | Number of sessions to show | `--limit 20` |
+| **session** | | | |
+| `session_id` | argument | Session ID | `20260301_143052_abc123` |
+| `--open-image` | flag | Open annotated image | `--open-image` |
+| **missed** | | | |
+| `--limit` | int | Number of stamps to show | `--limit 50` |
+
+### inspect
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| **sessions** | | | |
+| `--limit`, `-n` | int | Number of sessions | `--limit 20` |
+| **session** | | | |
+| `session_id` | argument | Session ID | `20260302_143052_abc123` |
+| **identification** | | | |
+| `session_id` | argument | Session ID | `20260302_143052_abc123` |
+| `identification_id` | argument | Identification ID | `abc123_001` |
+| **open-images** | | | |
+| `session_id` | argument | Session ID | `20260302_143052_abc123` |
+| **preprocess-test** | | | |
+| `image_path` | argument (path) | Test image path | `path/to/image.jpg` |
+
+### train
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| **prepare** | | | |
+| `--source` | path (required) | Directory with raw images | `--source "C:/Photos"` |
+| `--output` | path | Output dataset directory | `--output "data/training"` |
+| **labelstudio** | | | |
+| `--port` | int | Port for Label Studio | `--port 8080` |
+| `--data-dir` | path | Images directory | `--data-dir "data/training/raw"` |
+| **import** | | | |
+| `--annotations` | path (required) | Label Studio JSON export | `--annotations "annotations.json"` |
+| `--images` | path | Images directory | `--images "data/training/raw"` |
+| `--output` | path | Output dataset directory | `--output "data/training"` |
+| `--split` | float | Train/val split ratio | `--split 0.8` |
+| **run** | | | |
+| `--dataset` | path | Dataset directory | `--dataset "data/training"` |
+| `--epochs` | int | Number of training epochs | `--epochs 100` |
+| `--batch` | int | Batch size | `--batch 16` |
+| `--model-size` | choice | Model size (n/s/m/l) | `--model-size s` |
+| `--device` | string | Device (cpu/0/0,1) | `--device 0` |
+| **export** | | | |
+| `--model` | path (required) | Trained model path | `--model "best.pt"` |
+| `--output` | path | Output path | `--output "models/stamp_detector.pt"` |
+| **evaluate** | | | |
+| `--model` | path (required) | Model path | `--model "models/stamp_detector.pt"` |
+| `--dataset` | path | Dataset directory | `--dataset "data/training"` |
+| **test** | | | |
+| `--model` | path (required) | Model path | `--model "models/stamp_detector.pt"` |
+| `--image` | path (required) | Test image path | `--image "test.jpg"` |
+| `--save` | path | Save annotated result | `--save "result.jpg"` |
+| **status** | | | |
+| `--dataset` | path | Dataset directory | `--dataset "data/training"` |
+
+### migrate
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| **match** | | | |
+| No parameters | | | |
+| **import** | | | |
+| `--dry-run` | flag | Simulate without changes | `--dry-run` |
+| **review** | | | |
+| No parameters | | | |
+| **status** | | | |
+| No parameters | | | |
+
+### config
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| **show** | | | |
+| No parameters | | | |
+| **validate** | | | |
+| No parameters | | | |
+
+## Quick Start Guide
+
+For new users, follow these steps to get started:
+
+1. **Initialize the system:**
+   ```bash
+   stamp-tools init
+   ```
+
+2. **Configure API keys** (edit `.env.keys` file):
+   - GROQ_API_KEY (for vision AI)
+   - OPENAI_API_KEY (for embeddings)
+   - SUPABASE_URL and SUPABASE_KEY (for RAG database)
+
+3. **Build your stamp database:**
+   ```bash
+   # Scrape space-themed stamps from Colnect
+   stamp-tools scrape colnect --themes "Space,Astronomy" --dry-run --limit 10
+
+   # Index them for AI search
+   stamp-tools rag index
+   ```
+
+4. **Start identifying stamps:**
+   ```bash
+   # From camera
+   stamp-tools identify camera
+
+   # From image file
+   stamp-tools identify image --path "my_stamp.jpg"
+   ```
+
+## Command Groups
+
+### 1. Initialization (`init`)
+Sets up the entire system for first use.
+
+**Real-life examples:**
+```bash
+# First-time setup
+stamp-tools init
+
+# Check if everything is properly configured
+stamp-tools config validate
+```
+
+### 2. Web Scraping (`scrape`)
+Build your stamp database by scraping online catalogs.
+
+#### Colnect Scraping
+```bash
+# Scrape all default space themes
+stamp-tools scrape colnect
+
+# Scrape specific themes with country filter
+stamp-tools scrape colnect --themes "Rockets,Planets" --country "USA"
+
+# Scrape by year with preview
+stamp-tools scrape colnect --year 2020 --dry-run --limit 5
+
+# Resume interrupted scraping
+stamp-tools scrape colnect --resume
+
+# Large collection scraping
+stamp-tools scrape colnect --themes "Space,Astronomy,Rockets" --limit 1000
+```
+
+#### LASTDODO Scraping (Future)
+```bash
+# Scrape your personal LASTDODO collection
+stamp-tools scrape lastdodo
+```
+
+### 3. RAG Database (`rag`)
+Manage your AI-searchable stamp database.
+
+#### Database Setup
+```bash
+# Initialize Supabase RAG table
+stamp-tools rag init
+
+# Index all scraped stamps
+stamp-tools rag index
+
+# Index specific country/year
+stamp-tools rag index --country "Japan" --year 2019
+
+# Batch processing for large collections
+stamp-tools rag index --batch
+
+# Regenerate descriptions with updated AI prompts
+stamp-tools rag index --regenerate
+```
+
+#### Search and Discovery
+```bash
+# Find stamps about Apollo missions
+stamp-tools rag search --query "Apollo 11 moon landing"
+
+# Search with filters
+stamp-tools rag search --query "satellite" --country "Russia" --limit 10
+
+# Find space animals
+stamp-tools rag search --query "dog monkey chimpanzee space"
+
+# Specific rocket searches
+stamp-tools rag search --query "Falcon 9 SpaceX" --year 2020
+```
+
+#### Database Management
+```bash
+# Check database statistics
+stamp-tools rag stats
+
+# Monitor indexing progress
+stamp-tools rag stats  # Shows local vs RAG comparison
+```
+
+### 4. Stamp Identification (`identify`)
+Identify physical stamps using AI vision.
+
+#### Camera Identification
+```bash
+# Auto-detect mode (single stamp or album page)
+stamp-tools identify camera
+
+# Force single stamp mode
+stamp-tools identify camera --mode single
+
+# Album page with multiple stamps
+stamp-tools identify camera --mode multi
+
+# Auto-add confirmed matches to collection
+stamp-tools identify camera --mode multi --add-to-colnect
+
+# Use different camera
+stamp-tools identify camera --camera 1
+```
+
+#### Image File Identification
+```bash
+# Identify single stamp photo
+stamp-tools identify image --path "stamp_photo.jpg"
+
+# Album page with multiple stamps
+stamp-tools identify image --path "collection_page.jpg" --mode multi
+
+# Force single stamp treatment
+stamp-tools identify image --path "closeup.jpg" --mode single
+
+# Batch processing workflow
+for file in stamps/*.jpg; do
+    stamp-tools identify image --path "$file" --mode single
+done
+```
+
+### 5. Review and Inspection (`review`, `inspect`)
+Review identification results and system performance.
+
+#### Session Review
+```bash
+# List recent identification sessions
+stamp-tools review sessions
+
+# Review specific session in detail
+stamp-tools review session 20260301_143052_abc123
+
+# Open annotated image for visual inspection
+stamp-tools review session 20260301_143052_abc123 --open-image
+
+# Check stamps that need manual review
+stamp-tools review missed --limit 50
+```
+
+#### Technical Inspection
+```bash
+# List all inspection sessions
+stamp-tools inspect sessions
+
+# Detailed session analysis
+stamp-tools inspect session 20260302_143052_abc123
+
+# Analyze specific identification
+stamp-tools inspect identification 20260302_143052_abc123 abc123_001
+
+# Open all session images
+stamp-tools inspect open-images 20260302_143052_abc123
+
+# Test preprocessing on difficult images
+stamp-tools inspect preprocess-test difficult_scan.jpg
+```
+
+### 6. Training (`train`)
+Train custom YOLO models for stamp detection.
+
+#### Dataset Preparation
+```bash
+# Prepare images from your collection
+stamp-tools train prepare --source "C:/MyPhotos/Stamps"
+
+# Start Label Studio for annotation
+stamp-tools train labelstudio --port 8080
+
+# Export annotations to YOLO format
+stamp-tools train import --annotations "project.json" --split 0.8
+```
+
+#### Model Training
+```bash
+# Quick training test
+stamp-tools train run --epochs 50 --model-size n
+
+# Production training
+stamp-tools train run --epochs 200 --batch 32 --model-size s --device 0
+
+# Evaluate trained model
+stamp-tools train evaluate --model "runs/detect/stamp_detection/train/weights/best.pt"
+
+# Test on single image
+stamp-tools train test --model "models/stamp_detector.pt" --image "test.jpg" --save "result.jpg"
+
+# Export for production use
+stamp-tools train export --model "runs/detect/stamp_detection/train/weights/best.pt"
+
+# Check training status
+stamp-tools train status
+```
+
+### 7. Migration (`migrate`)
+Migrate collections from other platforms (Future).
+
+```bash
+# Match LASTDODO items to Colnect
+stamp-tools migrate match
+
+# Preview import changes
+stamp-tools migrate import --dry-run
+
+# Live import to Colnect
+stamp-tools migrate import
+
+# Review unmatched items
+stamp-tools migrate review
+
+# Check migration status
+stamp-tools migrate status
+```
+
+### 8. Configuration (`config`)
+Manage system settings and validation.
+
+```bash
+# Show current configuration
+stamp-tools config show
+
+# Validate all settings and connections
+stamp-tools config validate
+```
+
+## Advanced Workflows
+
+### Building a Space Collection
+```bash
+# 1. Initialize system
+stamp-tools init
+
+# 2. Scrape comprehensive space catalog
+stamp-tools scrape colnect --themes "Space,Astronomy,Rockets,Planets,Satellites"
+
+# 3. Index for AI search
+stamp-tools rag index --batch
+
+# 4. Test identification on your collection
+stamp-tools identify image --path "my_space_stamps.jpg" --mode multi
+
+# 5. Search for similar stamps
+stamp-tools rag search --query "International Space Station" --limit 10
+```
+
+### Processing Large Collections
+```bash
+# 1. Batch scraping with checkpoints
+stamp-tools scrape colnect --limit 5000 --resume
+
+# 2. Monitor progress
+stamp-tools rag stats
+
+# 3. Continue if interrupted
+stamp-tools scrape colnect --resume
+
+# 4. Batch indexing
+stamp-tools rag index --batch --regenerate
+```
+
+### Quality Assurance Workflow
+```bash
+# 1. Review recent sessions
+stamp-tools review sessions --limit 20
+
+# 2. Check missed stamps
+stamp-tools review missed
+
+# 3. Inspect problematic identifications
+stamp-tools inspect session 20260301_143052_abc123
+
+# 4. Test preprocessing on difficult cases
+stamp-tools inspect preprocess-test poor_lighting.jpg
+```
+
+## Tips and Best Practices
+
+1. **Start Small:** Use `--dry-run` and `--limit` flags to test before large operations
+2. **Checkpoints:** Most operations support `--resume` for interrupted tasks
+3. **Batch Processing:** Use `--batch` flag for large collections
+4. **Validation:** Run `stamp-tools config validate` before major operations
+5. **Debug Mode:** Use `--debug` flag for detailed logging
+
+## Troubleshooting
+
+Common issues and solutions:
+
+- **API Key Errors:** Check `.env.keys` file and run `stamp-tools config validate`
+- **Database Issues:** Run `stamp-tools init` to reset database
+- **Model Not Found:** YOLO model auto-downloads on first use
+- **Memory Issues:** Use smaller batch sizes or `--batch` processing
+- **Camera Issues:** Check camera index with `--camera 1` or higher
 
 Commands:
     init        Initialize database and verify connections
     scrape      Web scraping commands (colnect, lastdodo)
     rag         RAG database commands (index, search, stats)
     identify    Stamp identification (camera, image)
+    review      Review scan sessions and missed stamps
+    inspect     Inspection tools for Vision LLM pipeline results
+    train       YOLO model training commands for stamp detection
     migrate     LASTDODO migration (match, import, review, status)
     config      Configuration commands (show, validate)
 """

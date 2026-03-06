@@ -30,6 +30,7 @@ dependencies = [
     "pillow>=10.0",
     "opencv-python>=4.8",
     "anthropic>=0.84.0",
+    "inference-sdk>=1.0.4",
 ]
 
 [project.optional-dependencies]

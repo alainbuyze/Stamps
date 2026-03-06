@@ -1,4 +1,35 @@
-"""Core module - configuration, logging, database, and error handling."""
+"""Core infrastructure module for the Stamp Collection Toolset.
+
+This module provides the foundational components used across all other packages:
+
+Modules
+-------
+config.py
+    Pydantic Settings-based configuration management. Loads settings from
+    .env.app (defaults), .env.keys (secrets), and .env.local (overrides).
+    Provides computed paths relative to OUTPUT_ROOT_DIR.
+
+database.py
+    SQLite database operations with dataclass models. Defines CatalogStamp
+    (Colnect scraped data), LastdodoItem (LASTDODO collection), and ImportTask
+    (migration tracking). Provides CRUD operations and statistics queries.
+
+errors.py
+    Custom exception hierarchy rooted at StampToolsError. Organized by domain:
+    scraping (ScrapingError, PageNotFoundError), RAG (EmbeddingError, SearchError),
+    vision (VisionError, DetectionError), and migration (MigrationError).
+
+logging.py
+    Rich-based logging setup for formatted console output with colors and
+    structured log files.
+
+Key Exports
+-----------
+- Settings, get_settings(): Configuration access
+- CatalogStamp, LastdodoItem, ImportTask: Data models
+- Database CRUD functions: upsert_*, get_*, count_*
+- Exception classes: StampToolsError and subclasses
+"""
 
 from src.core.config import Settings, get_settings, reset_settings
 from src.core.database import (
