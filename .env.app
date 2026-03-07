@@ -141,8 +141,8 @@ OUTPUT_DIR=data
 # =============================================================================
 
 # Your workspace and project slugs from https://app.roboflow.com
-ROBOFLOW_WORKSPACE=stamp-detector-wyo9i/1
-ROBOFLOW_PROJECT=stamp-detector
+ROBOFLOW_WORKSPACE=alains-workspace-3ysq8
+ROBOFLOW_PROJECT=stamp-detector-wyo9i
 ROBOFLOW_VERSION=1
 
 # Local path where the downloaded .pt file is cached (auto-downloaded on first run)

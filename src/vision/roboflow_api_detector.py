@@ -75,10 +75,15 @@ class RoboflowAPIDetector:
             img_base64 = base64.b64encode(buf.tobytes()).decode("utf-8")
 
             model_id = f"{self.project}/{self.version}"
+            logger.info(f"Roboflow API call: model_id={model_id}, workspace={self.workspace}, confidence={self.confidence_threshold}")
+            logger.debug(f"Image size: {image.shape}, base64 length: {len(img_base64)}")
+
             response = self._client.infer(
                 img_base64,
                 model_id=model_id,
             )
+
+            logger.debug(f"Roboflow raw response: {response}")
 
             h, w = image.shape[:2]
             detections: list[VisionDetection] = []
@@ -134,17 +139,28 @@ class RoboflowAPIDetector:
         return result
 
     def _save_inspection(self, image, result, inspection_id):
+        """Save inspection data inside session folder structure."""
+        # Create session folder
+        session_dir = self.inspection_dir / inspection_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save annotated detection image
         annotated = image.copy()
-        colors = {"high": (0,255,0), "medium": (0,255,255), "low": (0,165,255)}
+        colors = {"high": (0, 255, 0), "medium": (0, 255, 255), "low": (0, 165, 255)}
         for det in result.detections:
             if det.box_pixels is None:
                 continue
             x, y, w, h = det.box_pixels
-            color = colors.get(det.confidence, (255,255,255))
-            cv2.rectangle(annotated, (x,y), (x+w,y+h), color, 2)
-        cv2.imwrite(str(self.inspection_dir / f"{inspection_id}_annotated.jpg"), annotated)
-        cv2.imwrite(str(self.inspection_dir / f"{inspection_id}_original.jpg"), image)
-        with open(self.inspection_dir / f"{inspection_id}_result.json", "w") as f:
+            color = colors.get(det.confidence, (255, 255, 255))
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 2)
+
+        # Save in annotated subfolder (matching pipeline structure)
+        annotated_dir = session_dir / "annotated"
+        annotated_dir.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(annotated_dir / "roboflow_detection.jpg"), annotated)
+
+        # Save result JSON in session folder
+        with open(session_dir / "roboflow_result.json", "w") as f:
             json.dump(result.to_dict(), f, indent=2)
 
 

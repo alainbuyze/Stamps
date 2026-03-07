@@ -12,6 +12,7 @@ stamp collection database using AI-powered identification and web scraping.
 - **review** - Review scan sessions and missed stamps
 - **inspect** - Technical inspection of vision pipeline results
 - **train** - YOLO model training for stamp detection
+- **colnect** - Browser automation for Colnect (verify, add, check)
 - **migrate** - Collection migration from other platforms
 - **config** - Configuration management and validation
 
@@ -125,6 +126,20 @@ No parameters available.
 | `--save` | path | Save annotated result | `--save "result.jpg"` |
 | **status** | | | |
 | `--dataset` | path | Dataset directory | `--dataset "data/training"` |
+
+### colnect
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| **verify** | | | |
+| No parameters | | Verify CDP connection and login | |
+| **add** | | | |
+| `url` | argument | Colnect stamp URL | `"https://colnect.com/..."` |
+| `--condition` | choice | Stamp condition | `--condition MNH` |
+| `--quantity` | int | Number of copies | `--quantity 2` |
+| `--comment` | string | Optional note | `--comment "From album"` |
+| `--force` | flag | Add even if owned | `--force` |
+| **check** | | | |
+| `url` | argument | Colnect stamp URL | `"https://colnect.com/..."` |
 
 ### migrate
 | Parameter | Type | Description | Example |
@@ -1233,10 +1248,10 @@ def identify_camera(mode: str, add_to_colnect: bool, camera: int) -> None:
         _display_session_results(session, console)
 
         if add_to_colnect:
-            confirmed = [i for i in session.identifications if i.auto_accepted]
+            confirmed = [i for i in session.identifications if i.auto_accepted and i.top_match]
             if confirmed:
-                console.print("\n[yellow]Colnect automation not yet implemented[/yellow]")
-                console.print(f"Would add {len(confirmed)} stamps to Colnect collection.")
+                console.print(f"\n[bold]Adding {len(confirmed)} confirmed stamps to Colnect...[/bold]")
+                _add_stamps_to_colnect(confirmed, console)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Cancelled.[/yellow]")
@@ -1322,10 +1337,10 @@ def identify_image(path: str, mode: str, add_to_colnect: bool) -> None:
         console.print(f"\n[dim]Inspection data: {settings.inspection_path / session.session_id}/[/dim]")
 
         if add_to_colnect:
-            confirmed = [i for i in session.identifications if i.auto_accepted]
+            confirmed = [i for i in session.identifications if i.auto_accepted and i.top_match]
             if confirmed:
-                console.print("\n[yellow]Colnect automation not yet implemented[/yellow]")
-                console.print(f"Would add {len(confirmed)} stamps to Colnect collection.")
+                console.print(f"\n[bold]Adding {len(confirmed)} confirmed stamps to Colnect...[/bold]")
+                _add_stamps_to_colnect(confirmed, console)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Cancelled.[/yellow]")
@@ -1401,6 +1416,75 @@ def _display_session_results(session, console) -> None:
             )
 
         console.print(table)
+
+
+def _add_stamps_to_colnect(identifications: list, console) -> None:
+    """Add confirmed stamps to Colnect collection via CDP automation.
+
+    Parameters
+    ----------
+    identifications : list
+        List of identification results with top_match containing colnect_url.
+    console : Console
+        Rich console for output.
+    """
+    import asyncio
+    from src.colnect_api import create_colnect_session, create_colnect_actions
+    from src.core.errors import CDPConnectionError, ColnectActionError
+
+    async def add_all():
+        try:
+            async with create_colnect_session() as session:
+                # Verify login
+                if not await session.verify_colnect_login():
+                    console.print("[red]✗[/red] Not logged into Colnect")
+                    console.print("[dim]Please log in manually and try again[/dim]")
+                    return 0
+
+                actions = create_colnect_actions(session)
+                added = 0
+                skipped = 0
+
+                for ident in identifications:
+                    if not ident.top_match or not ident.top_match.colnect_url:
+                        continue
+
+                    url = ident.top_match.colnect_url
+                    stamp_id = ident.top_match.colnect_id
+
+                    try:
+                        console.print(f"  Adding {stamp_id}... ", end="")
+                        success = await actions.add_to_collection(
+                            colnect_url=url,
+                            condition="MNH",  # Default condition
+                            quantity=1,
+                            comment=f"Added via stamp-tools (session: {ident.identification_id})",
+                            skip_if_owned=True,
+                        )
+
+                        if success:
+                            console.print("[green]done[/green]")
+                            added += 1
+                        else:
+                            console.print("[yellow]skipped (already owned)[/yellow]")
+                            skipped += 1
+
+                    except ColnectActionError as e:
+                        console.print(f"[red]failed: {e}[/red]")
+
+                return added
+
+        except CDPConnectionError as e:
+            console.print(f"[red]CDP connection failed: {e}[/red]")
+            console.print("[dim]Start Chrome with --remote-debugging-port=9222[/dim]")
+            return 0
+
+    try:
+        added = asyncio.run(add_all())
+        if added > 0:
+            console.print(f"\n[green]Successfully added {added} stamp(s) to Colnect![/green]")
+    except Exception as e:
+        console.print(f"\n[red]Error adding stamps: {e}[/red]")
 
 
 # =============================================================================
@@ -2236,6 +2320,209 @@ def migrate_status() -> None:
     except Exception as e:
         console.print(f"[red]Error getting status: {e}[/red]")
         console.print("[dim]Run 'stamp-tools init' to initialize the database.[/dim]")
+
+
+# =============================================================================
+# Colnect Command Group (Browser Automation)
+# =============================================================================
+
+
+@cli.group()
+def colnect() -> None:
+    """Colnect browser automation commands.
+
+    Requires Chrome running with CDP enabled:
+        & "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222
+
+    Log into Colnect manually in that Chrome window before using these commands.
+    """
+    pass
+
+
+@colnect.command("verify")
+def colnect_verify() -> None:
+    """Verify CDP connection and Colnect login status.
+
+    Connects to Chrome via CDP and checks if the user is logged into Colnect.
+
+    Example:
+        stamp-tools colnect verify
+    """
+    import asyncio
+    from src.colnect_api import create_colnect_session
+    from src.core.errors import CDPConnectionError
+
+    console.print(Panel("Colnect Connection Verification", style="bold blue"))
+
+    async def verify():
+        try:
+            console.print("[dim]Connecting to Chrome via CDP...[/dim]")
+            async with create_colnect_session() as session:
+                console.print("[green]✓[/green] Connected to Chrome")
+
+                console.print("[dim]Checking Colnect login status...[/dim]")
+                is_logged_in = await session.verify_colnect_login()
+
+                if is_logged_in:
+                    console.print("[green]✓[/green] Logged into Colnect")
+                    page = await session.get_colnect_page()
+                    console.print(f"[dim]Current page: {page.url}[/dim]")
+                    return True
+                else:
+                    console.print("[yellow]![/yellow] Not logged into Colnect")
+                    console.print("[dim]Please log in manually in the Chrome window[/dim]")
+                    return False
+
+        except CDPConnectionError as e:
+            console.print(f"[red]✗[/red] CDP connection failed: {e}")
+            console.print()
+            console.print("[bold]Troubleshooting:[/bold]")
+            console.print('1. Start Chrome with: & "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222')
+            console.print("2. Ensure CHROME_CDP_URL in .env.app matches the port (default: http://localhost:9222)")
+            return False
+
+    try:
+        success = asyncio.run(verify())
+        if success:
+            console.print(Panel("[green]Ready to use Colnect automation![/green]", style="green"))
+        else:
+            sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Verification failed: {e}[/red]")
+        sys.exit(1)
+
+
+@colnect.command("add")
+@click.argument("url")
+@click.option("--condition", default="MNH", type=click.Choice(["MNH", "MH", "Used", "CTO", "FDC"]),
+              help="Stamp condition")
+@click.option("--quantity", default=1, type=int, help="Number of copies")
+@click.option("--comment", default=None, help="Optional comment/note")
+@click.option("--force", is_flag=True, help="Add even if already owned")
+def colnect_add(url: str, condition: str, quantity: int, comment: str, force: bool) -> None:
+    """Add a stamp to Colnect collection.
+
+    Requires Chrome with CDP and logged-in Colnect session.
+
+    Example:
+        stamp-tools colnect add "https://colnect.com/en/stamps/stamp/12345-Name"
+        stamp-tools colnect add "https://colnect.com/en/stamps/stamp/12345-Name" --condition Used
+        stamp-tools colnect add "https://colnect.com/en/stamps/stamp/12345-Name" --quantity 2 --comment "From album"
+    """
+    import asyncio
+    from src.colnect_api import create_colnect_session, create_colnect_actions
+    from src.core.errors import CDPConnectionError, ColnectActionError
+
+    console.print(Panel("Add to Colnect Collection", style="bold blue"))
+    console.print(f"[bold]URL:[/bold] {url}")
+    console.print(f"[bold]Condition:[/bold] {condition}")
+    console.print(f"[bold]Quantity:[/bold] {quantity}")
+    if comment:
+        console.print(f"[bold]Comment:[/bold] {comment}")
+    console.print()
+
+    async def add_stamp():
+        try:
+            console.print("[dim]Connecting to Chrome via CDP...[/dim]")
+            async with create_colnect_session() as session:
+                console.print("[green]✓[/green] Connected to Chrome")
+
+                # Verify login
+                if not await session.verify_colnect_login():
+                    console.print("[red]✗[/red] Not logged into Colnect")
+                    console.print("[dim]Please log in manually in the Chrome window and try again[/dim]")
+                    return False
+
+                console.print("[green]✓[/green] Logged into Colnect")
+
+                # Create actions and add stamp
+                actions = create_colnect_actions(session)
+
+                console.print("[dim]Adding stamp to collection...[/dim]")
+                success = await actions.add_to_collection(
+                    colnect_url=url,
+                    condition=condition,
+                    quantity=quantity,
+                    comment=comment,
+                    skip_if_owned=not force,
+                )
+
+                return success
+
+        except CDPConnectionError as e:
+            console.print(f"[red]✗[/red] CDP connection failed: {e}")
+            return False
+        except ColnectActionError as e:
+            console.print(f"[red]✗[/red] Action failed: {e}")
+            return False
+
+    try:
+        success = asyncio.run(add_stamp())
+        if success:
+            console.print(Panel(
+                f"[green]Stamp added to collection![/green]\n"
+                f"Condition: {condition}, Quantity: {quantity}",
+                style="green"
+            ))
+        else:
+            console.print("[red]Failed to add stamp[/red]")
+            sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+
+@colnect.command("check")
+@click.argument("url")
+def colnect_check(url: str) -> None:
+    """Check if a stamp is already in your collection.
+
+    Example:
+        stamp-tools colnect check "https://colnect.com/en/stamps/stamp/12345-Name"
+    """
+    import asyncio
+    from src.colnect_api import create_colnect_session, create_colnect_actions
+    from src.core.errors import CDPConnectionError
+
+    console.print(Panel("Check Colnect Ownership", style="bold blue"))
+    console.print(f"[bold]URL:[/bold] {url}")
+    console.print()
+
+    async def check_ownership():
+        try:
+            async with create_colnect_session() as session:
+                if not await session.verify_colnect_login():
+                    console.print("[red]Not logged into Colnect[/red]")
+                    return None
+
+                actions = create_colnect_actions(session)
+                return await actions.check_owned(url)
+
+        except CDPConnectionError as e:
+            console.print(f"[red]CDP connection failed: {e}[/red]")
+            return None
+
+    try:
+        ownership = asyncio.run(check_ownership())
+        if ownership is None:
+            sys.exit(1)
+
+        table = Table(show_header=False)
+        table.add_column("Property", style="bold")
+        table.add_column("Value")
+
+        table.add_row("Owned", "[green]Yes[/green]" if ownership.owned else "[yellow]No[/yellow]")
+        if ownership.owned:
+            table.add_row("Quantity", str(ownership.quantity))
+            if ownership.condition:
+                table.add_row("Condition", ownership.condition)
+        table.add_row("In Wishlist", "Yes" if ownership.in_wishlist else "No")
+
+        console.print(table)
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
 
 
 # =============================================================================

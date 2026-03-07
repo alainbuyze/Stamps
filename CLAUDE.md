@@ -212,6 +212,27 @@ uv run stamp-tools migrate review
 uv run stamp-tools migrate status
 ```
 
+### Colnect Browser Automation
+
+```powershell
+# Start Chrome with CDP (required for Colnect automation)
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
+# Then log into Colnect manually in that Chrome window
+
+# Verify CDP connection and Colnect login
+uv run stamp-tools colnect verify
+
+# Add a stamp to your Colnect collection
+uv run stamp-tools colnect add "https://colnect.com/en/stamps/stamp/12345-Name"
+uv run stamp-tools colnect add "https://colnect.com/en/stamps/stamp/12345-Name" --condition MNH --quantity 2
+
+# Check if you already own a stamp
+uv run stamp-tools colnect check "https://colnect.com/en/stamps/stamp/12345-Name"
+
+# Identify stamps and auto-add confirmed matches to Colnect
+uv run stamp-tools identify image --path "album.jpg" --mode multi --add-to-colnect
+```
+
 ### Configuration
 
 ```powershell

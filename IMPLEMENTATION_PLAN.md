@@ -1,13 +1,13 @@
 # Stamp Collection Toolset — Implementation Plan
 
 **Created:** 2026-02-23
-**Last Updated:** 2026-03-06 (Roboflow detector integration)
-**Status:** Phases 1-4 Complete, Phase 5-6 Not Started
-**Estimated Remaining Effort:** 12-16 hours (Phases 5-7)
+**Last Updated:** 2026-03-07 (Phase 5 Colnect browser automation)
+**Status:** Phases 1-5 Complete, Phase 6 Not Started
+**Estimated Remaining Effort:** 8-10 hours (Phase 6-7)
 
 ---
 
-## Progress Summary (2026-03-06)
+## Progress Summary (2026-03-07)
 
 | Phase | Status | Progress |
 |-------|--------|----------|
@@ -15,7 +15,7 @@
 | Phase 2: Colnect Scraping | ✅ COMPLETE | 100% |
 | Phase 3: RAG Pipeline | ✅ COMPLETE | 100% |
 | Phase 4: Detection & Identification | ✅ COMPLETE | 100% (evolved beyond plan) |
-| Phase 5: Colnect Browser Automation | ❌ NOT STARTED | 0% |
+| Phase 5: Colnect Browser Automation | ✅ COMPLETE | 100% |
 | Phase 6: LASTDODO Migration | ❌ NOT STARTED | 0% |
 | Phase 7: Polish & Testing | ⚠️ PARTIAL | 30% |
 
@@ -73,6 +73,8 @@ Album page photo
 | `src/vision/rag_adapter.py` | Bridge to RAG search |
 | `src/vision/roboflow_detector.py` | Local YOLOv8 detector (uses downloaded .pt weights) |
 | `src/vision/roboflow_api_detector.py` | Roboflow hosted API detector (no download needed, free tier) |
+| `src/colnect_api/session.py` | Chrome CDP connection and Colnect login verification |
+| `src/colnect_api/actions.py` | Colnect collection operations (add, check ownership) |
 
 ---
 
@@ -85,14 +87,14 @@ Album page photo
 | Core/Config | ✅ Complete | Stamp-specific settings, OUTPUT_ROOT_DIR support |
 | Core/Errors | ✅ Complete | Full domain exception hierarchy |
 | Core/Database | ✅ Complete | SQLite operations with CatalogStamp, LastdodoItem, ImportTask |
-| CLI | ✅ Complete | Full command structure (scrape, rag, identify, inspect, review, train, migrate, config) |
+| CLI | ✅ Complete | Full command structure (scrape, rag, identify, inspect, review, train, colnect, migrate, config) |
 | Scraping | ⚠️ Partial | Browser, Colnect complete; LASTDODO missing |
 | RAG | ✅ Complete | Embeddings, Supabase, indexer, search all working |
 | Vision | ✅ Complete | Vision LLM detection, preprocessing, inspection |
 | Identification | ✅ Complete | Full pipeline with feedback system |
 | Feedback | ✅ Complete | Session visualization, missed stamps tracking |
 | Migration | ❌ Missing | LASTDODO → Colnect workflow not implemented |
-| Colnect API | ❌ Missing | CDP browser automation not implemented |
+| Colnect API | ✅ Complete | CDP session, verify login, add/check stamps |
 | Tests | ⚠️ Partial | Some tests exist, need expansion |
 
 ---
@@ -140,13 +142,15 @@ uv run stamp-tools identify image --path album_page.jpg --mode multi
 #    .env.app: ROBOFLOW_MODEL_PATH=models/stamp_detector/weights/best.pt
 ```
 
-### Priority 1: Complete Phase 5 (Colnect Browser Automation)
+### ~~Priority 1: Complete Phase 5 (Colnect Browser Automation)~~ ✅ COMPLETE
 
-Required for adding identified stamps to collection:
-- `src/colnect_api/session.py` - CDP connection
-- `src/colnect_api/actions.py` - Add to collection action
+Implemented 2026-03-07:
+- `src/colnect_api/session.py` - CDP connection and login verification ✅
+- `src/colnect_api/actions.py` - Add to collection, check ownership ✅
+- CLI commands: `colnect verify`, `colnect add`, `colnect check` ✅
+- Integration with `identify --add-to-colnect` flag ✅
 
-### Priority 2: Complete Phase 6 (LASTDODO Migration)
+### Priority 1: Complete Phase 6 (LASTDODO Migration)
 
 One-time migration workflow:
 - `src/scraping/lastdodo.py` - Collection scraper
@@ -155,7 +159,7 @@ One-time migration workflow:
 - `src/migration/importer.py` - Import orchestration
 - `src/migration/review.py` - Manual review CLI
 
-### Priority 3: Complete Phase 7 (Polish & Testing)
+### Priority 2: Complete Phase 7 (Polish & Testing)
 
 - Expand test suite
 - Add `__main__` blocks to all modules per documentation conventions
@@ -826,10 +830,11 @@ class ColnectActions:
 
 ### Phase 5 Deliverables
 
-- [ ] `src/colnect_api/__init__.py` ❌ NOT STARTED
-- [ ] `src/colnect_api/session.py` - CDP connection ❌
-- [ ] `src/colnect_api/actions.py` - Collection operations ❌
-- [ ] Integration with identification pipeline ❌
+- [x] `src/colnect_api/__init__.py` ✅
+- [x] `src/colnect_api/session.py` - CDP connection & login verification ✅
+- [x] `src/colnect_api/actions.py` - Collection operations (add, check) ✅
+- [x] Integration with identification pipeline (`--add-to-colnect` flag) ✅
+- [x] CLI commands: `stamp-tools colnect verify|add|check` ✅
 
 ---
 
@@ -1138,15 +1143,26 @@ Phase 7 (Polish)
 
 ## Recommended Next Action
 
-**Verify identification pipeline works end-to-end:**
+**Phase 6: Implement LASTDODO Migration**
+
+The Colnect browser automation (Phase 5) is now complete. Next step is implementing
+the LASTDODO migration workflow to transfer your existing collection:
 
 ```powershell
-# Test with a sample stamp image
-uv run stamp-tools identify image --path <path_to_test_image> --mode single
+# 1. First, test the Colnect automation is working
+#    Start Chrome with CDP:
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
+#    Log into Colnect in that Chrome window
 
-# If working, test multi-stamp detection
-uv run stamp-tools identify image --path <album_page_image> --mode multi
+# 2. Verify the connection
+uv run stamp-tools colnect verify
+
+# 3. Test adding a stamp (optional - use a test URL)
+uv run stamp-tools colnect add "https://colnect.com/en/stamps/stamp/12345-Name" --condition MNH
+
+# 4. Test with identification pipeline
+uv run stamp-tools identify image --path <album_page.jpg> --mode multi --add-to-colnect
 ```
 
-If identification works → proceed to Phase 5 (Colnect Browser Automation)
-If identification fails → debug Vision LLM integration first
+If Colnect automation works → proceed to Phase 6 (LASTDODO Migration)
+If issues with CDP connection → check Chrome is running with `--remote-debugging-port=9222`
